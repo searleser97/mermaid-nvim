@@ -29,9 +29,14 @@ end
 ---@param content_hash string
 ---@param tick integer changedtick at time of request
 function M.render_async(buf, block, config, content_hash, tick)
+  -- Set PYTHONIOENCODING for tools like termaid that output Unicode
+  local env = vim.fn.environ()
+  env.PYTHONIOENCODING = 'utf-8'
+
   vim.system(config.cmd, {
     stdin = block.source,
     text = true,
+    env = env,
   }, function(result)
     vim.schedule(function()
       if not vim.api.nvim_buf_is_valid(buf) then
