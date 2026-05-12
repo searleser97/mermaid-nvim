@@ -1,0 +1,1 @@
+-- Defer setup to user calling require('mermaid-nvim').setup()
