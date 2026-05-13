@@ -83,19 +83,17 @@ function M.apply_extmarks(buf, block, ascii_output)
     virt_lines[#virt_lines + 1] = { { line, 'Comment' } }
   end
 
-  -- Hide each source line and show ASCII art via virt_lines on the first line
+  -- Add virtual lines above the block (before concealing source)
+  vim.api.nvim_buf_set_extmark(buf, ns, block.start_row, 0, {
+    virt_lines = virt_lines,
+    virt_lines_above = true,
+  })
+
+  -- Hide each source line entirely with conceal_lines
   for row = block.start_row, block.end_row do
-    local opts = {
-      end_row = row,
-      end_col = #(vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ''),
-      conceal = '',
-    }
-    -- Attach virtual lines to the first concealed line
-    if row == block.start_row then
-      opts.virt_lines = virt_lines
-      opts.virt_lines_above = false
-    end
-    vim.api.nvim_buf_set_extmark(buf, ns, row, 0, opts)
+    vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
+      conceal_lines = '',
+    })
   end
 end
 
