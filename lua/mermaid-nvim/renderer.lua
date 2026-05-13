@@ -8,9 +8,26 @@ local ns = vim.api.nvim_create_namespace('mermaid_nvim')
 ---@param buf integer
 ---@param block mermaid.Block
 ---@param config mermaid.Config
+---Get the usable text width of the window showing a buffer
+---@param buf integer
+---@return integer
+local function get_text_width(buf)
+  -- Find a window displaying this buffer
+  local win = vim.fn.bufwinid(buf)
+  if win == -1 then
+    win = vim.api.nvim_get_current_win()
+  end
+  local info = vim.fn.getwininfo(win)[1]
+  return info.width - info.textoff
+end
+
+---Render a single mermaid block
+---@param buf integer
+---@param block mermaid.Block
+---@param config mermaid.Config
 function M.render_block(buf, block, config)
-  local win_width = vim.api.nvim_win_get_width(0)
-  local content_hash = cache.hash(block.source, config.cmd, win_width)
+  local text_width = get_text_width(buf)
+  local content_hash = cache.hash(block.source, config.cmd, text_width)
   local cached = cache.get(content_hash)
 
   if cached then
@@ -21,7 +38,7 @@ function M.render_block(buf, block, config)
   -- Capture changedtick to detect stale results
   local tick = vim.api.nvim_buf_get_changedtick(buf)
 
-  M.render_async(buf, block, config, content_hash, tick)
+  M.render_async(buf, block, config, content_hash, tick, text_width)
 end
 
 ---@param buf integer
@@ -29,16 +46,16 @@ end
 ---@param config mermaid.Config
 ---@param content_hash string
 ---@param tick integer changedtick at time of request
-function M.render_async(buf, block, config, content_hash, tick)
+---@param text_width integer usable text columns
+function M.render_async(buf, block, config, content_hash, tick, text_width)
   -- Set PYTHONIOENCODING for tools like termaid that output Unicode
   local env = vim.fn.environ()
   env.PYTHONIOENCODING = 'utf-8'
 
   -- Build command with width constraint
   local cmd = vim.deepcopy(config.cmd)
-  local win_width = vim.api.nvim_win_get_width(0)
   if cmd[1] == 'termaid' then
-    vim.list_extend(cmd, { '--width', tostring(win_width) })
+    vim.list_extend(cmd, { '--width', tostring(text_width) })
   end
 
   vim.system(cmd, {
