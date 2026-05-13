@@ -67,6 +67,21 @@ function M.attach(buf)
   end
   M.attached_bufs[buf] = true
 
+  -- Ensure conceallevel is set so conceal extmarks work
+  vim.api.nvim_create_autocmd('BufWinEnter', {
+    buffer = buf,
+    callback = function()
+      local win = vim.api.nvim_get_current_win()
+      if vim.wo[win].conceallevel < 2 then
+        vim.wo[win].conceallevel = 2
+      end
+    end,
+  })
+  -- Set for the current window immediately
+  if vim.wo.conceallevel < 2 then
+    vim.wo.conceallevel = 2
+  end
+
   local group = vim.api.nvim_create_augroup('MermaidNvim_' .. buf, { clear = true })
   local timer = vim.uv.new_timer()
 
