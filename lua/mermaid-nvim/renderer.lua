@@ -112,7 +112,7 @@ function M.open_float(ascii_output)
   end
 
   local editor_width = vim.o.columns
-  local editor_height = vim.o.lines - 2 -- account for cmdline + statusline
+  local editor_height = vim.o.lines - vim.o.cmdheight - 1 -- subtract cmdline + statusline
   local float_width = math.min(max_width + 2, editor_width - 4)
   local float_height = math.min(#lines, editor_height - 4)
 
@@ -123,9 +123,9 @@ function M.open_float(ascii_output)
   vim.bo[float_buf].bufhidden = 'wipe'
   vim.bo[float_buf].filetype = 'mermaid-preview'
 
-  -- Open centered floating window
-  local row = math.floor((editor_height - float_height) / 2)
-  local col = math.floor((editor_width - float_width) / 2)
+  -- Open centered floating window (border adds 2 to each dimension)
+  local row = math.floor((editor_height - float_height - 2) / 2)
+  local col = math.floor((editor_width - float_width - 2) / 2)
   local win = vim.api.nvim_open_win(float_buf, true, {
     relative = 'editor',
     width = float_width,
