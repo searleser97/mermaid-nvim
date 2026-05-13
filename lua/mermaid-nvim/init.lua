@@ -51,11 +51,17 @@ function M.setup(opts)
       end,
     })
 
-    -- Attach to already-open markdown buffers
+    -- Attach to already-open markdown buffers (handles lazy-load timing)
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
       if vim.api.nvim_buf_is_loaded(buf) and vim.bo[buf].filetype == 'markdown' then
         M.attach(buf)
       end
+    end
+
+    -- Also attach the current buffer if it's markdown (lazy.nvim ft trigger)
+    local cur = vim.api.nvim_get_current_buf()
+    if vim.bo[cur].filetype == 'markdown' then
+      M.attach(cur)
     end
   end
 end
