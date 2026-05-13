@@ -129,6 +129,33 @@ function M.attach(buf)
     end,
   })
 
+  -- Buffer-local <CR> and double-click: open float if on a mermaid block
+  local function try_open_float()
+    local cursor_row = vim.api.nvim_win_get_cursor(0)[1] - 1
+    local blocks = scanner.find_blocks(buf)
+    for _, block in ipairs(blocks) do
+      if cursor_row >= block.start_row and cursor_row <= block.end_row then
+        M.float_block()
+        return true
+      end
+    end
+    return false
+  end
+
+  vim.keymap.set('n', '<CR>', function()
+    if not try_open_float() then
+      local key = vim.api.nvim_replace_termcodes('<CR>', true, false, true)
+      vim.api.nvim_feedkeys(key, 'n', false)
+    end
+  end, { buffer = buf, desc = 'Open mermaid diagram in float or default <CR>' })
+
+  vim.keymap.set('n', '<LeftRelease>', function()
+    if not try_open_float() then
+      local key = vim.api.nvim_replace_termcodes('<LeftRelease>', true, false, true)
+      vim.api.nvim_feedkeys(key, 'n', false)
+    end
+  end, { buffer = buf, desc = 'Open mermaid diagram in float on click' })
+
   -- Initial render
   M.render_buf(buf)
 end
