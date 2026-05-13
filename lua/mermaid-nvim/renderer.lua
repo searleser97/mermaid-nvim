@@ -8,26 +8,8 @@ local ns = vim.api.nvim_create_namespace('mermaid_nvim')
 ---@param buf integer
 ---@param block mermaid.Block
 ---@param config mermaid.Config
----Get the usable text width of the window showing a buffer
----@param buf integer
----@return integer
-local function get_text_width(buf)
-  -- Find a window displaying this buffer
-  local win = vim.fn.bufwinid(buf)
-  if win == -1 then
-    win = vim.api.nvim_get_current_win()
-  end
-  local info = vim.fn.getwininfo(win)[1]
-  return info.width - info.textoff
-end
-
----Render a single mermaid block
----@param buf integer
----@param block mermaid.Block
----@param config mermaid.Config
 function M.render_block(buf, block, config)
-  local text_width = get_text_width(buf)
-  local content_hash = cache.hash(block.source, config.cmd, text_width)
+  local content_hash = cache.hash(block.source, config.cmd)
   local cached = cache.get(content_hash)
 
   if cached then
@@ -35,28 +17,22 @@ function M.render_block(buf, block, config)
     return
   end
 
-  -- Capture changedtick to detect stale results
-  local tick = vim.api.nvim_buf_get_changedtick(buf)
-
-  M.render_async(buf, block, config, content_hash, tick, text_width)
+  M.render_async(buf, block, config, content_hash)
 end
 
 ---@param buf integer
 ---@param block mermaid.Block
 ---@param config mermaid.Config
 ---@param content_hash string
----@param tick integer changedtick at time of request
----@param text_width integer usable text columns
-function M.render_async(buf, block, config, content_hash, tick, text_width)
+function M.render_async(buf, block, config, content_hash)
   -- Set PYTHONIOENCODING for tools like termaid that output Unicode
   local env = vim.fn.environ()
   env.PYTHONIOENCODING = 'utf-8'
 
-  -- Build command with width constraint
   local cmd = vim.deepcopy(config.cmd)
-  if cmd[1] == 'termaid' then
-    vim.list_extend(cmd, { '--width', tostring(text_width) })
-  end
+
+  -- Remember the source we're rendering to verify on completion
+  local expected_source = block.source
 
   vim.system(cmd, {
     stdin = block.source,
@@ -65,11 +41,6 @@ function M.render_async(buf, block, config, content_hash, tick, text_width)
   }, function(result)
     vim.schedule(function()
       if not vim.api.nvim_buf_is_valid(buf) then
-        return
-      end
-
-      -- Discard stale results: buffer was edited since we started
-      if vim.api.nvim_buf_get_changedtick(buf) ~= tick then
         return
       end
 
@@ -102,10 +73,11 @@ function M.apply_extmarks(buf, block, ascii_output)
 
   local ascii_lines = vim.split(ascii_output, '\n')
 
-  -- Build virtual lines for the ASCII diagram
+  -- Build virtual lines for the ASCII diagram (with right padding)
+  local padding = string.rep(' ', 4)
   local virt_lines = {}
   for _, line in ipairs(ascii_lines) do
-    virt_lines[#virt_lines + 1] = { { line, 'Comment' } }
+    virt_lines[#virt_lines + 1] = { { line .. padding, 'Comment' } }
   end
 
   -- Hide each source line and show ASCII art via virt_lines on the first line
@@ -115,13 +87,70 @@ function M.apply_extmarks(buf, block, ascii_output)
       end_col = #(vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ''),
       conceal = '',
     }
-    -- Attach virtual lines to the first concealed line
+    -- Attach virtual lines and a clickable "Open" button to the first concealed line
     if row == block.start_row then
       opts.virt_lines = virt_lines
       opts.virt_lines_above = false
+      opts.virt_lines_overflow = 'scroll'
+      opts.virt_text = { { ' 🔍 Open in float ', 'DiagnosticInfo' } }
+      opts.virt_text_pos = 'eol'
     end
     vim.api.nvim_buf_set_extmark(buf, ns, row, 0, opts)
   end
+end
+
+---Open a mermaid diagram in a scrollable floating window
+---@param ascii_output string
+function M.open_float(ascii_output)
+  local lines = vim.split(ascii_output, '\n')
+
+  -- Calculate float dimensions
+  local max_width = 0
+  for _, line in ipairs(lines) do
+    local w = vim.fn.strdisplaywidth(line)
+    if w > max_width then max_width = w end
+  end
+
+  local editor_width = vim.o.columns
+  local editor_height = vim.o.lines - 2 -- account for cmdline + statusline
+  local float_width = math.min(max_width + 2, editor_width - 4)
+  local float_height = math.min(#lines, editor_height - 4)
+
+  -- Create scratch buffer with diagram content
+  local float_buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, lines)
+  vim.bo[float_buf].modifiable = false
+  vim.bo[float_buf].bufhidden = 'wipe'
+  vim.bo[float_buf].filetype = 'mermaid-preview'
+
+  -- Open centered floating window
+  local row = math.floor((editor_height - float_height) / 2)
+  local col = math.floor((editor_width - float_width) / 2)
+  local win = vim.api.nvim_open_win(float_buf, true, {
+    relative = 'editor',
+    width = float_width,
+    height = float_height,
+    row = row,
+    col = col,
+    style = 'minimal',
+    border = 'rounded',
+    title = ' Mermaid Diagram ',
+    title_pos = 'center',
+  })
+
+  -- Close on q, <Esc>, or leaving the window
+  local function close()
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_close(win, true)
+    end
+  end
+  vim.keymap.set('n', 'q', close, { buffer = float_buf, nowait = true })
+  vim.keymap.set('n', '<Esc>', close, { buffer = float_buf, nowait = true })
+  vim.api.nvim_create_autocmd('WinLeave', {
+    buffer = float_buf,
+    once = true,
+    callback = close,
+  })
 end
 
 ---Handle render errors
