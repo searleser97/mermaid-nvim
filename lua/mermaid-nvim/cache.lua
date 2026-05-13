@@ -3,12 +3,13 @@ local M = {}
 ---@type table<string, string> hash -> rendered ASCII output
 M.entries = {}
 
----Hash content + command to avoid stale cache across renderer changes
+---Hash content + command + width to avoid stale cache
 ---@param content string
 ---@param cmd string[]
+---@param width integer
 ---@return string
-function M.hash(content, cmd)
-  return vim.fn.sha256(table.concat(cmd, '\0') .. '\0' .. content)
+function M.hash(content, cmd, width)
+  return vim.fn.sha256(table.concat(cmd, '\0') .. '\0' .. tostring(width) .. '\0' .. content)
 end
 
 ---Get cached render output

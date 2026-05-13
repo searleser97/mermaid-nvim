@@ -9,7 +9,8 @@ local ns = vim.api.nvim_create_namespace('mermaid_nvim')
 ---@param block mermaid.Block
 ---@param config mermaid.Config
 function M.render_block(buf, block, config)
-  local content_hash = cache.hash(block.source, config.cmd)
+  local win_width = vim.api.nvim_win_get_width(0)
+  local content_hash = cache.hash(block.source, config.cmd, win_width)
   local cached = cache.get(content_hash)
 
   if cached then
@@ -33,7 +34,14 @@ function M.render_async(buf, block, config, content_hash, tick)
   local env = vim.fn.environ()
   env.PYTHONIOENCODING = 'utf-8'
 
-  vim.system(config.cmd, {
+  -- Build command with width constraint
+  local cmd = vim.deepcopy(config.cmd)
+  local win_width = vim.api.nvim_win_get_width(0)
+  if cmd[1] == 'termaid' then
+    vim.list_extend(cmd, { '--width', tostring(win_width) })
+  end
+
+  vim.system(cmd, {
     stdin = block.source,
     text = true,
     env = env,
