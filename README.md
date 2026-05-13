@@ -6,7 +6,7 @@ Supports both standard fenced code blocks (` ```mermaid `) and container syntax 
 
 ## Requirements
 
-- Neovim >= 0.10
+- Neovim >= 0.11
 - A mermaid-to-ASCII CLI tool (default: [termaid](https://github.com/fasouto/termaid))
 
 ## Installation
@@ -17,14 +17,20 @@ Supports both standard fenced code blocks (` ```mermaid `) and container syntax 
 {
   "searleser97/mermaid-nvim",
   ft = { "markdown" },
+  build = "pip install termaid",
   opts = {},
 }
 ```
 
-### Install the renderer
+To also install the interactive TUI viewer (optional, for `:MermaidFloat` in terminal mode):
 
-```bash
-pip install termaid
+```lua
+{
+  "searleser97/mermaid-nvim",
+  ft = { "markdown" },
+  build = "pip install termaid[tui]",
+  opts = {},
+}
 ```
 
 ## Configuration
@@ -42,6 +48,10 @@ require('mermaid-nvim').setup({
 
   -- How to display render errors: 'virtual_text', 'notify', or 'silent'
   on_error = 'virtual_text',
+
+  -- Set nowrap + virtualedit + smoothscroll on markdown windows
+  -- Enables horizontal scrolling for wide diagrams
+  nowrap = true,
 })
 ```
 
@@ -54,8 +64,16 @@ Mermaid blocks are automatically rendered as ASCII art when you open a markdown 
 | Command | Description |
 |---------|-------------|
 | `:MermaidToggle` | Toggle the block under cursor between preview and source |
+| `:MermaidToggleAll` | Toggle all blocks between preview and source |
+| `:MermaidFloat` | Open the block under cursor in a scrollable floating window |
 | `:MermaidRender` | Re-render all blocks in the current buffer |
 | `:MermaidClear` | Clear all previews in the current buffer |
+
+### Interaction
+
+- **Enter** on a mermaid block opens it in a floating window
+- **Click** on a mermaid block opens it in a floating window
+- **`q`** or **`<Esc>`** closes the floating window
 
 ### Supported syntax
 
