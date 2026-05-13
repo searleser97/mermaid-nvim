@@ -43,7 +43,7 @@ function M.setup(opts)
   if M.config.enabled then
     local group = vim.api.nvim_create_augroup('MermaidNvim', { clear = true })
 
-    vim.api.nvim_create_autocmd('FileType', {
+    vim.api.nvim_create_autocmd({ 'FileType' }, {
       group = group,
       pattern = 'markdown',
       callback = function(ev)
@@ -51,15 +51,14 @@ function M.setup(opts)
       end,
     })
 
-    -- Deferred attach: when lazy.nvim loads via ft, the filetype may not
-    -- be set yet during setup(). Schedule to run after event processing.
-    vim.schedule(function()
-      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-        if vim.api.nvim_buf_is_loaded(buf) and vim.bo[buf].filetype == 'markdown' then
-          M.attach(buf)
+    vim.api.nvim_create_autocmd('BufWinEnter', {
+      group = group,
+      callback = function(ev)
+        if vim.bo[ev.buf].filetype == 'markdown' then
+          M.attach(ev.buf)
         end
-      end
-    end)
+      end,
+    })
   end
 end
 
