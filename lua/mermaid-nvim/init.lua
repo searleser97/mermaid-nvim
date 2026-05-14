@@ -10,6 +10,7 @@ local M = {}
 ---@field preview_mode 'tab'|'float' Whether to open diagrams in a new tab or a floating window
 ---@field exclude_bufs string[] Buffer names to exclude from mermaid-nvim (no window settings or rendering)
 ---@field shorten_labels boolean Replace long node labels with short IDs and show a legend above the diagram
+---@field shorten_labels_hints boolean Show abbreviation hints alongside short IDs in shortened diagrams
 ---@field render_inline_on_open boolean Whether to render diagrams inline when the buffer is opened
 ---@field float_initial_view_centered boolean Whether to center the viewport in the float window on open
 ---@field float_scroll_step_horizontal integer Number of columns to scroll per arrow key press in float
@@ -22,6 +23,7 @@ local default_config = {
   preview_mode = 'tab',
   exclude_bufs = {},
   shorten_labels = false,
+  shorten_labels_hints = true,
   render_inline_on_open = true,
   float_initial_view_centered = true,
   float_scroll_step_horizontal = 6,
@@ -299,6 +301,7 @@ function M.float_block(shorten_override)
   if use_shorten == nil then
     use_shorten = M.config.shorten_labels
   end
+  local use_hints = M.config.shorten_labels_hints
 
   for _, block in ipairs(blocks) do
     if cursor_row >= block.start_row and cursor_row <= block.end_row then
@@ -309,7 +312,7 @@ function M.float_block(shorten_override)
         local alt_legend = nil
 
         if alt_shorten then
-          local alt_result, alt_warning = shortener.shorten(block.source)
+          local alt_result, alt_warning = shortener.shorten(block.source, use_hints)
           if alt_warning and M.config.on_error ~= 'silent' then
             vim.notify('[mermaid-nvim] ' .. alt_warning, vim.log.levels.WARN)
           end
@@ -327,14 +330,64 @@ function M.float_block(shorten_override)
             output = table.concat(alt_legend, '\n') .. '\n\n' .. output
           end
           renderer.replace_content(preview_buf, preview_win, output, M.config)
-          -- Flip the toggle state for next press
           use_shorten = alt_shorten
         end
 
         if alt_cached then
           apply_output(alt_cached)
         else
-          -- Show loading feedback in the buffer
+          renderer.replace_content(preview_buf, preview_win, '⏳ Rendering...', M.config)
+
+          local env = vim.fn.environ()
+          env.PYTHONIOENCODING = 'utf-8'
+          vim.system(vim.deepcopy(M.config.cmd), {
+            stdin = alt_source,
+            text = true,
+            env = env,
+          }, function(result)
+            vim.schedule(function()
+              if result.code == 0 and result.stdout and result.stdout ~= '' then
+                local output = result.stdout:gsub('\n$', '')
+                cache.set(alt_hash, output)
+                apply_output(output)
+              else
+                vim.notify('[mermaid-nvim] Render error', vim.log.levels.ERROR)
+              end
+            end)
+          end)
+        end
+      end
+
+      -- Build toggle callback for hints (h key)
+      local function on_toggle_hints(preview_buf, preview_win)
+        if not use_shorten then return end -- hints only apply when shortened
+        local alt_hints = not use_hints
+        local alt_source = block.source
+        local alt_legend = nil
+
+        local alt_result, alt_warning = shortener.shorten(block.source, alt_hints)
+        if alt_warning and M.config.on_error ~= 'silent' then
+          vim.notify('[mermaid-nvim] ' .. alt_warning, vim.log.levels.WARN)
+        end
+        if alt_result then
+          alt_source = alt_result.source
+          alt_legend = shortener.format_legend(alt_result.mappings)
+        end
+
+        local alt_hash = cache.hash(alt_source, M.config.cmd)
+        local alt_cached = cache.get(alt_hash)
+
+        local function apply_output(output)
+          if alt_legend then
+            output = table.concat(alt_legend, '\n') .. '\n\n' .. output
+          end
+          renderer.replace_content(preview_buf, preview_win, output, M.config)
+          use_hints = alt_hints
+        end
+
+        if alt_cached then
+          apply_output(alt_cached)
+        else
           renderer.replace_content(preview_buf, preview_win, '⏳ Rendering...', M.config)
 
           local env = vim.fn.environ()
@@ -361,7 +414,7 @@ function M.float_block(shorten_override)
       local render_source = block.source
       local legend_lines = nil
       if use_shorten then
-        local result, warning = shortener.shorten(block.source)
+        local result, warning = shortener.shorten(block.source, use_hints)
         if warning then
           if M.config.on_error ~= 'silent' then
             vim.notify('[mermaid-nvim] ' .. warning, vim.log.levels.WARN)
@@ -401,9 +454,9 @@ function M.float_block(shorten_override)
           output = table.concat(legend_lines, '\n') .. '\n\n' .. output
         end
         if use_tab then
-          renderer.open_tab(output, M.config, on_toggle_shorten)
+          renderer.open_tab(output, M.config, on_toggle_shorten, on_toggle_hints)
         else
-          renderer.open_float(output, M.config, on_toggle_shorten)
+          renderer.open_float(output, M.config, on_toggle_shorten, on_toggle_hints)
         end
       else
         renderer.set_button_loading(buf, block)
@@ -423,9 +476,9 @@ function M.float_block(shorten_override)
                 output = table.concat(legend_lines, '\n') .. '\n\n' .. output
               end
               if use_tab then
-                renderer.open_tab(output, M.config, on_toggle_shorten)
+                renderer.open_tab(output, M.config, on_toggle_shorten, on_toggle_hints)
               else
-                renderer.open_float(output, M.config, on_toggle_shorten)
+                renderer.open_float(output, M.config, on_toggle_shorten, on_toggle_hints)
               end
             else
               vim.notify('[mermaid-nvim] Render error', vim.log.levels.ERROR)

@@ -15,6 +15,43 @@ local function generate_id(index)
   return string.char(64 + first) .. string.char(64 + second)
 end
 
+--- Generate an abbreviation hint from a label
+--- CamelCase: first 2 chars per word (SkillsAggregator → SkAg)
+--- Space/underscore separated: first 2 chars per word, preserving case (api_tool_skills → ApTo)
+---@param label string
+---@return string
+local function generate_hint(label)
+  local parts = {}
+
+  -- Split on camelCase boundaries, spaces, underscores, and hyphens
+  -- First try camelCase split
+  local camel_parts = {}
+  for word in label:gmatch('[A-Z][a-z]*') do
+    camel_parts[#camel_parts + 1] = word
+  end
+
+  if #camel_parts >= 2 then
+    -- CamelCase: take first 2 chars of each word
+    for _, word in ipairs(camel_parts) do
+      parts[#parts + 1] = word:sub(1, 2)
+    end
+  else
+    -- Split on spaces, underscores, hyphens
+    for word in label:gmatch('[^%s_%-]+') do
+      if #word > 0 then
+        -- Take first 2 chars, preserving original case
+        parts[#parts + 1] = word:sub(1, 2)
+      end
+    end
+  end
+
+  if #parts == 0 then
+    return label:sub(1, 4)
+  end
+
+  return table.concat(parts)
+end
+
 --- Detect diagram type from mermaid source
 ---@param source string
 ---@return 'flowchart'|'sequence'|'unsupported'
@@ -118,7 +155,7 @@ local function shorten_flowchart(source)
     -- If node ID is already a single uppercase letter, use it as the short form
     if node_id:match('^%u$') then
       id_to_short[node_id] = node_id
-      mappings[#mappings + 1] = { short = node_id, label = label }
+      mappings[#mappings + 1] = { short = node_id, label = label, hint = generate_hint(label) }
       return node_id
     end
 
@@ -131,7 +168,7 @@ local function shorten_flowchart(source)
     used_shorts[short] = true
 
     id_to_short[node_id] = short
-    mappings[#mappings + 1] = { short = short, label = label }
+    mappings[#mappings + 1] = { short = short, label = label, hint = generate_hint(label) }
     return short
   end
 
@@ -257,7 +294,7 @@ local function shorten_sequence(source)
       -- If alias is already short, keep it as the display name
       if #alias <= MIN_LABEL_LENGTH then
         alias_to_short[alias] = alias
-        mappings[#mappings + 1] = { short = alias, label = label }
+        mappings[#mappings + 1] = { short = alias, label = label, hint = generate_hint(label) }
         -- Rewrite: participant ALIAS as SHORT
         new_lines[#new_lines + 1] = line:gsub('as%s+.+$', 'as ' .. alias)
       else
@@ -270,7 +307,7 @@ local function shorten_sequence(source)
         used_shorts[short] = true
 
         alias_to_short[alias] = short
-        mappings[#mappings + 1] = { short = short, label = label }
+        mappings[#mappings + 1] = { short = short, label = label, hint = generate_hint(label) }
         new_lines[#new_lines + 1] = line:gsub('as%s+.+$', 'as ' .. short)
       end
     else
@@ -288,7 +325,7 @@ local function shorten_sequence(source)
         used_shorts[short] = true
 
         alias_to_short[name] = short
-        mappings[#mappings + 1] = { short = short, label = name }
+        mappings[#mappings + 1] = { short = short, label = name, hint = generate_hint(name) }
         -- Use word boundary to avoid replacing inside other words
         new_lines[#new_lines + 1] = line:gsub(name, short)
       else
@@ -314,11 +351,48 @@ local function shorten_sequence(source)
   return { source = table.concat(new_lines, '\n'), mappings = mappings }
 end
 
+--- Replace short IDs with short:hint in flowchart source
+---@param source string Already-shortened source
+---@param mappings { short: string, label: string, hint: string }[]
+---@return string
+local function apply_hints_flowchart(source, mappings)
+  local result = source
+  for _, m in ipairs(mappings) do
+    -- In shortened source, labels are replaced inside shape brackets e.g. [A] → [A:SkAg]
+    -- Use shape-aware replacement to avoid modifying node IDs
+    for _, shape in ipairs(flowchart_shapes) do
+      local pattern = '(' .. shape.open .. ')' .. vim.pesc(m.short) .. '(' .. shape.close .. ')'
+      local replacement = '%1' .. m.short .. ':' .. m.hint .. '%2'
+      local new_result = result:gsub(pattern, replacement)
+      if new_result ~= result then
+        result = new_result
+        break
+      end
+    end
+  end
+  return result
+end
+
+--- Replace short IDs with short:hint in sequence source
+---@param source string Already-shortened source
+---@param mappings { short: string, label: string, hint: string }[]
+---@return string
+local function apply_hints_sequence(source, mappings)
+  local lines = vim.split(source, '\n')
+  for _, m in ipairs(mappings) do
+    for i, line in ipairs(lines) do
+      lines[i] = line:gsub('(as%s+)' .. vim.pesc(m.short) .. '%s*$', '%1' .. m.short .. ':' .. m.hint)
+    end
+  end
+  return table.concat(lines, '\n')
+end
+
 --- Shorten labels in a mermaid diagram
 ---@param source string The mermaid diagram source
----@return table|nil result { source: string, mappings: { short: string, label: string }[] }
+---@param show_hints boolean|nil Whether to include abbreviation hints in shortened labels
+---@return table|nil result { source: string, mappings: { short: string, label: string, hint: string }[] }
 ---@return string|nil warning Warning message if diagram type is unsupported
-function M.shorten(source)
+function M.shorten(source, show_hints)
   local dtype = detect_type(source)
 
   if dtype == 'flowchart' then
@@ -326,11 +400,17 @@ function M.shorten(source)
     if not result then
       return nil, nil -- no labels to shorten, just render as-is
     end
+    if show_hints then
+      result.source = apply_hints_flowchart(result.source, result.mappings)
+    end
     return result, nil
   elseif dtype == 'sequence' then
     local result = shorten_sequence(source)
     if not result then
       return nil, nil
+    end
+    if show_hints then
+      result.source = apply_hints_sequence(result.source, result.mappings)
     end
     return result, nil
   else

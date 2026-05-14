@@ -263,7 +263,8 @@ end
 ---@param ascii_output string
 ---@param opts mermaid.Config
 ---@param on_toggle_shorten function|nil Callback to re-render with toggled shorten_labels
-function M.open_float(ascii_output, opts, on_toggle_shorten)
+---@param on_toggle_hints function|nil Callback to re-render with toggled hints
+function M.open_float(ascii_output, opts, on_toggle_shorten, on_toggle_hints)
   local lines = vim.split(ascii_output, '\n')
 
   -- Calculate float dimensions
@@ -319,6 +320,13 @@ function M.open_float(ascii_output, opts, on_toggle_shorten)
     end, { buffer = float_buf, nowait = true })
   end
 
+  -- Toggle hints with 'h' — replaces content in-place
+  if on_toggle_hints then
+    vim.keymap.set('n', 'h', function()
+      on_toggle_hints(float_buf, win)
+    end, { buffer = float_buf, nowait = true })
+  end
+
   M.replace_content(float_buf, win, ascii_output, opts)
 end
 
@@ -326,7 +334,8 @@ end
 ---@param ascii_output string
 ---@param opts mermaid.Config
 ---@param on_toggle_shorten function|nil Callback that returns new content string (or nil)
-function M.open_tab(ascii_output, opts, on_toggle_shorten)
+---@param on_toggle_hints function|nil Callback to re-render with toggled hints
+function M.open_tab(ascii_output, opts, on_toggle_shorten, on_toggle_hints)
   vim.cmd('tabnew')
   local tab_buf = vim.api.nvim_get_current_buf()
   local tab_win = vim.api.nvim_get_current_win()
@@ -348,6 +357,13 @@ function M.open_tab(ascii_output, opts, on_toggle_shorten)
   if on_toggle_shorten then
     vim.keymap.set('n', 's', function()
       on_toggle_shorten(tab_buf, tab_win)
+    end, { buffer = tab_buf, nowait = true })
+  end
+
+  -- Toggle hints with 'h' — replaces content in-place
+  if on_toggle_hints then
+    vim.keymap.set('n', 'h', function()
+      on_toggle_hints(tab_buf, tab_win)
     end, { buffer = tab_buf, nowait = true })
   end
 
