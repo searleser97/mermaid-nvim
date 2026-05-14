@@ -8,26 +8,24 @@ local M = {}
 ---@field cmd string[] Command to run for rendering. Use { 'termaid' } for ASCII or { 'mmdc' } for image output.
 ---@field enabled boolean Whether to attach to markdown buffers (buttons, keymaps, auto-render)
 ---@field preview_mode 'tab'|'float' Whether to open diagrams in a new tab or a floating window
+---@field exclude_bufs string[] Buffer names to exclude from mermaid-nvim (no window settings or rendering)
 ---@field render_inline_on_open boolean Whether to render diagrams inline when the buffer is opened
 ---@field float_initial_view_centered boolean Whether to center the viewport in the float window on open
 ---@field float_scroll_step_horizontal integer Number of columns to scroll per arrow key press in float
 ---@field float_scroll_step_vertical integer Number of lines to scroll per arrow key press in float
----@field smoothscroll boolean Enable smoothscroll for markdown windows
 ---@field inline_render_delay_ms integer Delay in ms after typing stops before re-rendering inline diagrams
 ---@field on_error 'virtual_text'|'notify'|'silent' How to display render errors
----@field nowrap boolean Set nowrap on markdown windows for horizontal scrolling
 local default_config = {
   cmd = { 'termaid' },
   enabled = true,
   preview_mode = 'tab',
+  exclude_bufs = {},
   render_inline_on_open = true,
   float_initial_view_centered = true,
   float_scroll_step_horizontal = 6,
   float_scroll_step_vertical = 6,
-  smoothscroll = false,
   inline_render_delay_ms = 300,
   on_error = 'virtual_text',
-  nowrap = true,
 }
 
 -- Commands that produce image output (PNG) instead of text
@@ -108,32 +106,18 @@ function M.attach(buf)
   if M.attached_bufs[buf] then
     return
   end
+
+  -- Check if buffer name matches any exclusion
+  local buf_name = vim.api.nvim_buf_get_name(buf)
+  for _, pattern in ipairs(M.config.exclude_bufs) do
+    if buf_name:find(pattern, 1, true) then
+      return
+    end
+  end
+
   M.attached_bufs[buf] = true
 
-  -- Set nowrap for markdown so virt_lines_overflow="scroll" works
-  -- Apply deferred via BufWinEnter so it survives session restore
-  local function apply_win_settings()
-    if not M.config.nowrap then return end
-    vim.defer_fn(function()
-      if not vim.api.nvim_buf_is_valid(buf) then return end
-      for _, win in ipairs(vim.fn.win_findbuf(buf)) do
-        vim.wo[win].wrap = false
-        vim.wo[win].virtualedit = 'all'
-        if M.config.smoothscroll then
-          vim.wo[win].smoothscroll = true
-        end
-      end
-    end, 50)
-  end
-  apply_win_settings()
-
   local group = vim.api.nvim_create_augroup('MermaidNvim_' .. buf, { clear = true })
-
-  vim.api.nvim_create_autocmd('BufWinEnter', {
-    group = group,
-    buffer = buf,
-    callback = apply_win_settings,
-  })
 
   local timer = vim.uv.new_timer()
 

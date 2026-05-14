@@ -151,7 +151,6 @@ local function setup_preview_window(buf, win, lines, max_width, opts)
   -- Window settings
   vim.wo[win].wrap = false
   vim.wo[win].virtualedit = 'all'
-  vim.wo[win].smoothscroll = opts and opts.smoothscroll or false
 
   -- Navigation keymaps
   local h_step = (opts and opts.float_scroll_step_horizontal) or 6
