@@ -177,6 +177,7 @@ function M.replace_content(buf, win, new_output, opts)
   end
 
   local win_width = vim.api.nvim_win_get_width(win)
+  local win_height = vim.api.nvim_win_get_height(win)
 
   -- Center content horizontally by padding
   local should_center = opts and opts.float_initial_view_centered ~= nil and opts.float_initial_view_centered or true
@@ -184,6 +185,14 @@ function M.replace_content(buf, win, new_output, opts)
     local pad = string.rep(' ', math.floor((win_width - max_width) / 2))
     for i, line in ipairs(lines) do
       lines[i] = pad .. line
+    end
+  end
+
+  -- Center content vertically by prepending empty lines
+  if should_center and #lines < win_height then
+    local top_pad = math.floor((win_height - #lines) / 2)
+    for _ = 1, top_pad do
+      table.insert(lines, 1, '')
     end
   end
 
@@ -199,9 +208,8 @@ function M.replace_content(buf, win, new_output, opts)
     vim.fn.winrestview({ leftcol = center_col, topline = 1 })
     vim.api.nvim_win_set_cursor(win, { cursor_row, cursor_col })
   else
-    local cursor_col = math.floor(max_width / 2)
     local cursor_row = math.min(math.max(1, math.floor(#lines / 2)), #lines)
-    vim.api.nvim_win_set_cursor(win, { cursor_row, cursor_col })
+    vim.api.nvim_win_set_cursor(win, { cursor_row, 0 })
     vim.fn.winrestview({ leftcol = 0, topline = 1 })
   end
 end
@@ -372,6 +380,15 @@ function M.open_tab(ascii_output, opts, on_toggle_shorten)
     local pad = string.rep(' ', math.floor((tab_width - max_width) / 2))
     for i, line in ipairs(lines) do
       lines[i] = pad .. line
+    end
+  end
+
+  -- Center content vertically by prepending empty lines
+  local tab_height = vim.api.nvim_win_get_height(tab_win)
+  if should_center and #lines < tab_height then
+    local top_pad = math.floor((tab_height - #lines) / 2)
+    for _ = 1, top_pad do
+      table.insert(lines, 1, '')
     end
   end
 
