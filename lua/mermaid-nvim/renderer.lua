@@ -162,6 +162,50 @@ end
 
 ---Open a mermaid diagram in a scrollable floating window
 ---@param ascii_output string
+
+--- Replace buffer content in-place and re-center
+---@param buf integer
+---@param win integer
+---@param new_output string
+---@param opts mermaid.Config
+function M.replace_content(buf, win, new_output, opts)
+  local lines = vim.split(new_output, '\n')
+  local max_width = 0
+  for _, line in ipairs(lines) do
+    local w = vim.fn.strdisplaywidth(line)
+    if w > max_width then max_width = w end
+  end
+
+  local win_width = vim.api.nvim_win_get_width(win)
+
+  -- Center content horizontally by padding
+  local should_center = opts and opts.float_initial_view_centered ~= nil and opts.float_initial_view_centered or true
+  if should_center and max_width < win_width then
+    local pad = string.rep(' ', math.floor((win_width - max_width) / 2))
+    for i, line in ipairs(lines) do
+      lines[i] = pad .. line
+    end
+  end
+
+  vim.bo[buf].modifiable = true
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+
+  -- Re-center view
+  if max_width > win_width then
+    local center_col = math.max(0, math.floor((max_width - win_width) / 2))
+    local cursor_col = math.min(center_col + math.floor(win_width / 2), max_width - 1)
+    local cursor_row = math.min(math.max(1, math.floor(#lines / 2)), #lines)
+    vim.fn.winrestview({ leftcol = center_col, topline = 1 })
+    vim.api.nvim_win_set_cursor(win, { cursor_row, cursor_col })
+  else
+    local cursor_col = math.floor(max_width / 2)
+    local cursor_row = math.min(math.max(1, math.floor(#lines / 2)), #lines)
+    vim.api.nvim_win_set_cursor(win, { cursor_row, cursor_col })
+    vim.fn.winrestview({ leftcol = 0, topline = 1 })
+  end
+end
+
 --- Setup preview window keymaps, settings, and centering
 ---@param buf integer Buffer handle
 ---@param win integer Window handle
@@ -293,11 +337,10 @@ function M.open_float(ascii_output, opts, on_toggle_shorten)
     callback = close,
   })
 
-  -- Toggle shorten_labels with 's'
+  -- Toggle shorten_labels with 's' — replaces content in-place
   if on_toggle_shorten then
     vim.keymap.set('n', 's', function()
-      close()
-      on_toggle_shorten()
+      on_toggle_shorten(float_buf, win)
     end, { buffer = float_buf, nowait = true })
   end
 
@@ -307,7 +350,7 @@ end
 --- Open a mermaid diagram in a new tab (text/ASCII output)
 ---@param ascii_output string
 ---@param opts mermaid.Config
----@param on_toggle_shorten function|nil Callback to re-render with toggled shorten_labels
+---@param on_toggle_shorten function|nil Callback that returns new content string (or nil)
 function M.open_tab(ascii_output, opts, on_toggle_shorten)
   local lines = vim.split(ascii_output, '\n')
 
@@ -348,11 +391,10 @@ function M.open_tab(ascii_output, opts, on_toggle_shorten)
   vim.keymap.set('n', 'q', close, { buffer = tab_buf, nowait = true })
   vim.keymap.set('n', '<Esc>', close, { buffer = tab_buf, nowait = true })
 
-  -- Toggle shorten_labels with 's'
+  -- Toggle shorten_labels with 's' — replaces content in-place
   if on_toggle_shorten then
     vim.keymap.set('n', 's', function()
-      close()
-      on_toggle_shorten()
+      on_toggle_shorten(tab_buf, tab_win)
     end, { buffer = tab_buf, nowait = true })
   end
 

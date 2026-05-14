@@ -302,11 +302,56 @@ function M.float_block(shorten_override)
 
   for _, block in ipairs(blocks) do
     if cursor_row >= block.start_row and cursor_row <= block.end_row then
-      -- Build toggle callback that re-renders with opposite shorten mode
-      local function on_toggle_shorten()
-        -- Restore cursor to the block so float_block finds it again
-        vim.api.nvim_win_set_cursor(0, { block.start_row + 1, 0 })
-        M.float_block(not use_shorten)
+      -- Build toggle callback that replaces content in the existing preview buffer
+      local function on_toggle_shorten(preview_buf, preview_win)
+        local alt_shorten = not use_shorten
+        local alt_source = block.source
+        local alt_legend = nil
+
+        if alt_shorten then
+          local alt_result, alt_warning = shortener.shorten(block.source)
+          if alt_warning and M.config.on_error ~= 'silent' then
+            vim.notify('[mermaid-nvim] ' .. alt_warning, vim.log.levels.WARN)
+          end
+          if alt_result then
+            alt_source = alt_result.source
+            alt_legend = shortener.format_legend(alt_result.mappings)
+          end
+        end
+
+        local alt_hash = cache.hash(alt_source, M.config.cmd)
+        local alt_cached = cache.get(alt_hash)
+
+        local function apply_output(output)
+          if alt_legend then
+            output = table.concat(alt_legend, '\n') .. '\n\n' .. output
+          end
+          renderer.replace_content(preview_buf, preview_win, output, M.config)
+          -- Flip the toggle state for next press
+          use_shorten = alt_shorten
+        end
+
+        if alt_cached then
+          apply_output(alt_cached)
+        else
+          local env = vim.fn.environ()
+          env.PYTHONIOENCODING = 'utf-8'
+          vim.system(vim.deepcopy(M.config.cmd), {
+            stdin = alt_source,
+            text = true,
+            env = env,
+          }, function(result)
+            vim.schedule(function()
+              if result.code == 0 and result.stdout and result.stdout ~= '' then
+                local output = result.stdout:gsub('\n$', '')
+                cache.set(alt_hash, output)
+                apply_output(output)
+              else
+                vim.notify('[mermaid-nvim] Render error', vim.log.levels.ERROR)
+              end
+            end)
+          end)
+        end
       end
 
       -- Apply label shortening if enabled
