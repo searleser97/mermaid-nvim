@@ -334,6 +334,9 @@ function M.float_block(shorten_override)
         if alt_cached then
           apply_output(alt_cached)
         else
+          -- Show loading feedback in the buffer
+          renderer.replace_content(preview_buf, preview_win, '⏳ Rendering...', M.config)
+
           local env = vim.fn.environ()
           env.PYTHONIOENCODING = 'utf-8'
           vim.system(vim.deepcopy(M.config.cmd), {
