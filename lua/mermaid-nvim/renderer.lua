@@ -138,6 +138,69 @@ end
 
 ---Open a mermaid diagram in a scrollable floating window
 ---@param ascii_output string
+--- Setup preview window keymaps, settings, and centering
+---@param buf integer Buffer handle
+---@param win integer Window handle
+---@param lines string[] Content lines
+---@param max_width integer Max display width of content
+---@param opts mermaid.Config
+local function setup_preview_window(buf, win, lines, max_width, opts)
+  local win_width = vim.api.nvim_win_get_width(win)
+  local win_height = vim.api.nvim_win_get_height(win)
+
+  -- Window settings
+  vim.wo[win].wrap = false
+  vim.wo[win].virtualedit = 'all'
+  vim.wo[win].smoothscroll = opts and opts.smoothscroll or false
+
+  -- Navigation keymaps
+  local h_step = (opts and opts.float_scroll_step_horizontal) or 6
+  local v_step = (opts and opts.float_scroll_step_vertical) or 6
+  vim.keymap.set('n', '<Left>', function() vim.cmd('normal! ' .. h_step .. 'zh') end, { buffer = buf, nowait = true })
+  vim.keymap.set('n', '<Right>', function() vim.cmd('normal! ' .. h_step .. 'zl') end, { buffer = buf, nowait = true })
+  vim.keymap.set('n', '<Up>', function()
+    local keys = vim.api.nvim_replace_termcodes(v_step .. '<C-y>', true, false, true)
+    vim.api.nvim_feedkeys(keys, 'nx', false)
+  end, { buffer = buf, nowait = true })
+  vim.keymap.set('n', '<Down>', function()
+    local keys = vim.api.nvim_replace_termcodes(v_step .. '<C-e>', true, false, true)
+    vim.api.nvim_feedkeys(keys, 'nx', false)
+  end, { buffer = buf, nowait = true })
+  vim.keymap.set('n', 'H', function() vim.fn.winrestview({ leftcol = 0 }) end, { buffer = buf, nowait = true })
+  vim.keymap.set('n', 'L', function() vim.fn.winrestview({ leftcol = math.max(0, max_width - win_width) }) end, { buffer = buf, nowait = true })
+  vim.keymap.set('n', '0', function() vim.fn.winrestview({ leftcol = 0 }) end, { buffer = buf, nowait = true })
+  vim.keymap.set('n', 'c', function()
+    local center_col = math.max(0, math.floor((max_width - win_width) / 2))
+    local center_line = math.max(1, math.floor((#lines - win_height) / 2) + 1)
+    local mid_line = math.max(1, math.floor(#lines / 2))
+    local mid_col = math.max(0, math.floor(max_width / 2))
+    vim.api.nvim_win_set_cursor(win, { mid_line, mid_col })
+    vim.fn.winrestview({ leftcol = center_col, topline = center_line })
+  end, { buffer = buf, nowait = true })
+
+  local function center_top()
+    if max_width > win_width then
+      local center_col = math.max(0, math.floor((max_width - win_width) / 2))
+      -- Place cursor in the visible center area so Neovim doesn't snap the view
+      local cursor_col = math.min(center_col + math.floor(win_width / 2), max_width - 1)
+      local cursor_row = math.min(math.floor(vim.api.nvim_win_get_height(win) / 2), #lines)
+      vim.fn.winrestview({ leftcol = center_col, topline = 1 })
+      vim.api.nvim_win_set_cursor(win, { cursor_row, cursor_col })
+    end
+  end
+
+  vim.keymap.set('n', 't', center_top, { buffer = buf, nowait = true })
+
+  -- Apply initial centering
+  local should_center = opts and opts.float_initial_view_centered ~= nil and opts.float_initial_view_centered or true
+  if should_center then
+    center_top()
+  end
+end
+
+--- Open a mermaid diagram in a floating window (text/ASCII output)
+---@param ascii_output string
+---@param opts mermaid.Config
 function M.open_float(ascii_output, opts)
   local lines = vim.split(ascii_output, '\n')
 
@@ -149,11 +212,11 @@ function M.open_float(ascii_output, opts)
   end
 
   local editor_width = vim.o.columns
-  local editor_height = vim.o.lines - vim.o.cmdheight - 1 -- subtract cmdline + statusline
+  local editor_height = vim.o.lines - vim.o.cmdheight - 1
   local float_width = math.min(max_width + 2, editor_width - 4)
   local float_height = math.min(#lines, editor_height - 4)
 
-  -- Center content horizontally by padding lines if diagram is wider than window
+  -- Center content horizontally by padding lines
   local float_center = opts and opts.float_initial_view_centered ~= nil and opts.float_initial_view_centered or true
   if float_center and max_width < float_width then
     local pad = string.rep(' ', math.floor((float_width - max_width) / 2))
@@ -169,7 +232,7 @@ function M.open_float(ascii_output, opts)
   vim.bo[float_buf].bufhidden = 'wipe'
   vim.bo[float_buf].filetype = 'mermaid-preview'
 
-  -- Open centered floating window (border adds 2 to each dimension)
+  -- Open centered floating window
   local row = math.floor((editor_height - float_height - 2) / 2)
   local col = math.floor((editor_width - float_width - 2) / 2)
   local win = vim.api.nvim_open_win(float_buf, true, {
@@ -198,55 +261,53 @@ function M.open_float(ascii_output, opts)
     callback = close,
   })
 
-  -- Float window settings
-  vim.wo[win].wrap = false
-  vim.wo[win].virtualedit = 'all'
-  vim.wo[win].smoothscroll = opts and opts.smoothscroll or false
+  setup_preview_window(float_buf, win, lines, max_width, opts)
+end
 
-  -- Navigation keymaps: arrows pan the viewport
-  local h_step = (opts and opts.float_scroll_step_horizontal) or 6
-  local v_step = (opts and opts.float_scroll_step_vertical) or 6
-  vim.keymap.set('n', '<Left>', function() vim.cmd('normal! ' .. h_step .. 'zh') end, { buffer = float_buf, nowait = true })
-  vim.keymap.set('n', '<Right>', function() vim.cmd('normal! ' .. h_step .. 'zl') end, { buffer = float_buf, nowait = true })
-  vim.keymap.set('n', '<Up>', function()
-    local keys = vim.api.nvim_replace_termcodes(v_step .. '<C-y>', true, false, true)
-    vim.api.nvim_feedkeys(keys, 'nx', false)
-  end, { buffer = float_buf, nowait = true })
-  vim.keymap.set('n', '<Down>', function()
-    local keys = vim.api.nvim_replace_termcodes(v_step .. '<C-e>', true, false, true)
-    vim.api.nvim_feedkeys(keys, 'nx', false)
-  end, { buffer = float_buf, nowait = true })
-  vim.keymap.set('n', 'H', function() vim.fn.winrestview({ leftcol = 0 }) end, { buffer = float_buf, nowait = true })
-  vim.keymap.set('n', 'L', function() vim.fn.winrestview({ leftcol = math.max(0, max_width - float_width) }) end, { buffer = float_buf, nowait = true })
-  vim.keymap.set('n', '0', function() vim.fn.winrestview({ leftcol = 0 }) end, { buffer = float_buf, nowait = true })
-  vim.keymap.set('n', 'c', function()
-    local center_col = math.max(0, math.floor((max_width - float_width) / 2))
-    local center_line = math.max(1, math.floor((#lines - float_height) / 2) + 1)
-    local mid_line = math.max(1, math.floor(#lines / 2))
-    local mid_col = math.max(0, math.floor(max_width / 2))
-    vim.api.nvim_win_set_cursor(win, { mid_line, mid_col })
-    vim.fn.winrestview({ leftcol = center_col, topline = center_line })
-  end, { buffer = float_buf, nowait = true })
+--- Open a mermaid diagram in a new tab (text/ASCII output)
+---@param ascii_output string
+---@param opts mermaid.Config
+function M.open_tab(ascii_output, opts)
+  local lines = vim.split(ascii_output, '\n')
 
-  -- Center top: horizontally centered, top of diagram
-  local function center_top()
-    if max_width > float_width then
-      local center_col = math.max(0, math.floor((max_width - float_width) / 2))
-      local mid_line = math.max(1, math.floor(#lines / 2))
-      local mid_col = math.max(0, math.floor(max_width / 2))
-      -- Center horizontally like 'c', then go to top, cursor at middle of screen
-      vim.api.nvim_win_set_cursor(win, { mid_line, mid_col })
-      vim.fn.winrestview({ leftcol = center_col, topline = 1 })
-      vim.cmd('normal! ggM')
+  -- Calculate content dimensions
+  local max_width = 0
+  for _, line in ipairs(lines) do
+    local w = vim.fn.strdisplaywidth(line)
+    if w > max_width then max_width = w end
+  end
+
+  vim.cmd('tabnew')
+  local tab_buf = vim.api.nvim_get_current_buf()
+  local tab_win = vim.api.nvim_get_current_win()
+  local tab_width = vim.api.nvim_win_get_width(tab_win)
+
+  -- Center content horizontally by padding lines
+  local should_center = opts and opts.float_initial_view_centered ~= nil and opts.float_initial_view_centered or true
+  if should_center and max_width < tab_width then
+    local pad = string.rep(' ', math.floor((tab_width - max_width) / 2))
+    for i, line in ipairs(lines) do
+      lines[i] = pad .. line
     end
   end
 
-  vim.keymap.set('n', 't', center_top, { buffer = float_buf, nowait = true })
+  vim.bo[tab_buf].bufhidden = 'wipe'
+  vim.bo[tab_buf].buftype = 'nofile'
+  vim.bo[tab_buf].filetype = 'mermaid-preview'
 
-  -- Apply initial centering
-  if float_center then
-    center_top()
+  vim.api.nvim_buf_set_lines(tab_buf, 0, -1, false, lines)
+  vim.bo[tab_buf].modifiable = false
+
+  -- Close with q or Esc
+  local function close()
+    if vim.api.nvim_buf_is_valid(tab_buf) then
+      vim.cmd('bwipeout! ' .. tab_buf)
+    end
   end
+  vim.keymap.set('n', 'q', close, { buffer = tab_buf, nowait = true })
+  vim.keymap.set('n', '<Esc>', close, { buffer = tab_buf, nowait = true })
+
+  setup_preview_window(tab_buf, tab_win, lines, max_width, opts)
 end
 
 ---Handle render errors

@@ -7,6 +7,7 @@ local M = {}
 ---@class mermaid.Config
 ---@field cmd string[] Command to run for rendering. Use { 'termaid' } for ASCII or { 'mmdc' } for image output.
 ---@field enabled boolean Whether to attach to markdown buffers (buttons, keymaps, auto-render)
+---@field preview_mode 'tab'|'float' Whether to open diagrams in a new tab or a floating window
 ---@field render_inline_on_open boolean Whether to render diagrams inline when the buffer is opened
 ---@field float_initial_view_centered boolean Whether to center the viewport in the float window on open
 ---@field float_scroll_step_horizontal integer Number of columns to scroll per arrow key press in float
@@ -18,6 +19,7 @@ local M = {}
 local default_config = {
   cmd = { 'termaid' },
   enabled = true,
+  preview_mode = 'tab',
   render_inline_on_open = true,
   float_initial_view_centered = true,
   float_scroll_step_horizontal = 6,
@@ -303,6 +305,7 @@ function M.float_block()
   local buf = vim.api.nvim_get_current_buf()
   local cursor_row = vim.api.nvim_win_get_cursor(0)[1] - 1
   local blocks = scanner.find_blocks(buf)
+  local use_tab = M.config.preview_mode == 'tab'
 
   for _, block in ipairs(blocks) do
     if cursor_row >= block.start_row and cursor_row <= block.end_row then
@@ -310,26 +313,32 @@ function M.float_block()
       if M.is_image_mode() then
         local image_renderer = require('mermaid-nvim.image_renderer')
         if not image_renderer.is_available() then
-          vim.notify('[mermaid-nvim] image.nvim is not available', vim.log.levels.ERROR)
+          vim.notify('[mermaid-nvim] Image display not available', vim.log.levels.ERROR)
           return
         end
         renderer.set_button_loading(buf, block)
-        image_renderer.open_float(block.source, M.config)
+        if use_tab then
+          image_renderer.open_tab(block.source, M.config)
+        else
+          image_renderer.open_float(block.source, M.config)
+        end
         vim.defer_fn(function()
           renderer.set_button(buf, block)
         end, 500)
         return
       end
 
-      -- Text renderer path (existing behavior)
+      -- Text renderer path
       local content_hash = cache.hash(block.source, M.config.cmd)
       local cached = cache.get(content_hash)
       if cached then
-        renderer.open_float(cached, M.config)
+        if use_tab then
+          renderer.open_tab(cached, M.config)
+        else
+          renderer.open_float(cached, M.config)
+        end
       else
-        -- Show loading state
         renderer.set_button_loading(buf, block)
-        -- Render first, then open float
         local env = vim.fn.environ()
         env.PYTHONIOENCODING = 'utf-8'
         vim.system(vim.deepcopy(M.config.cmd), {
@@ -342,7 +351,11 @@ function M.float_block()
             if result.code == 0 and result.stdout and result.stdout ~= '' then
               local output = result.stdout:gsub('\n$', '')
               cache.set(content_hash, output)
-              renderer.open_float(output, M.config)
+              if use_tab then
+                renderer.open_tab(output, M.config)
+              else
+                renderer.open_float(output, M.config)
+              end
             else
               vim.notify('[mermaid-nvim] Render error', vim.log.levels.ERROR)
             end

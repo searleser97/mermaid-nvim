@@ -69,7 +69,7 @@ function M.display_iterm2(png_path, opts)
 
   local encoded = vim.base64.encode(data)
 
-  local params = 'inline=1'
+  local params = 'inline=1;preserveAspectRatio=1'
   if opts and opts.width then
     params = params .. ';width=' .. opts.width
   end
@@ -171,13 +171,102 @@ function M.open_float(source, config)
     for i = 1, float_height do empty[i] = '' end
     vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, empty)
     vim.bo[float_buf].modifiable = false
+    vim.cmd('redraw')
 
     -- Display image using iTerm2 protocol (OSC 1337)
-    M.display_iterm2(png_path, { width = float_width, height = float_height })
+    M.display_iterm2(png_path, { width = float_width - 4 })
 
     -- Clean up on close
     vim.api.nvim_create_autocmd('BufWipeout', {
       buffer = float_buf,
+      once = true,
+      callback = function()
+        os.remove(png_path)
+      end,
+    })
+  end)
+end
+
+--- Open a mermaid diagram as an image in a new tab
+---@param source string Mermaid diagram source
+---@param config table Plugin config
+function M.open_tab(source, config)
+  local cmd_name = config.cmd[1]
+  if vim.fn.executable(cmd_name) ~= 1 then
+    vim.notify('[mermaid-nvim] Command not found: ' .. cmd_name .. '. Is it in your PATH?', vim.log.levels.ERROR)
+    return
+  end
+
+  vim.cmd('tabnew')
+  local tab_buf = vim.api.nvim_get_current_buf()
+  local tab_win = vim.api.nvim_get_current_win()
+  vim.bo[tab_buf].bufhidden = 'wipe'
+  vim.bo[tab_buf].buftype = 'nofile'
+  vim.bo[tab_buf].filetype = 'mermaid-image-preview'
+
+  local win_width = vim.api.nvim_win_get_width(tab_win)
+  local win_height = vim.api.nvim_win_get_height(tab_win)
+
+  -- Show loading message
+  local lines = {}
+  for i = 1, win_height do lines[i] = '' end
+  lines[math.floor(win_height / 2)] = string.rep(' ', math.floor(win_width / 2) - 10) .. '⏳ Rendering diagram...'
+  vim.api.nvim_buf_set_lines(tab_buf, 0, -1, false, lines)
+  vim.bo[tab_buf].modifiable = false
+
+  -- Close with q or Esc
+  local function close()
+    if vim.api.nvim_buf_is_valid(tab_buf) then
+      vim.cmd('bwipeout! ' .. tab_buf)
+    end
+  end
+  vim.keymap.set('n', 'q', close, { buffer = tab_buf, nowait = true })
+  vim.keymap.set('n', '<Esc>', close, { buffer = tab_buf, nowait = true })
+
+  -- Render mermaid to PNG
+  local pixel_width = win_width * 16
+  local render_opts = {
+    cmd = config.cmd,
+    width = pixel_width,
+    scale = 2,
+    background = 'transparent',
+  }
+
+  M.render_to_png(source, render_opts, function(png_path, err)
+    if err then
+      if vim.api.nvim_buf_is_valid(tab_buf) then
+        vim.bo[tab_buf].modifiable = true
+        local err_lines = { '', '  ⚠ Render error:', '' }
+        for line in err:gmatch('[^\n]+') do
+          table.insert(err_lines, '  ' .. line)
+        end
+        vim.api.nvim_buf_set_lines(tab_buf, 0, -1, false, err_lines)
+        vim.bo[tab_buf].modifiable = false
+      end
+      vim.notify('[mermaid-nvim] Image render error: ' .. err, vim.log.levels.ERROR)
+      return
+    end
+
+    if not vim.api.nvim_buf_is_valid(tab_buf) then
+      os.remove(png_path)
+      return
+    end
+
+    -- Clear loading text
+    vim.bo[tab_buf].modifiable = true
+    local empty = {}
+    for i = 1, win_height do empty[i] = '' end
+    vim.api.nvim_buf_set_lines(tab_buf, 0, -1, false, empty)
+    vim.bo[tab_buf].modifiable = false
+    vim.cmd('redraw')
+
+    -- Display image using iTerm2 protocol (OSC 1337)
+    -- Only constrain width; height follows aspect ratio
+    M.display_iterm2(png_path, { width = win_width - 4 })
+
+    -- Clean up on close
+    vim.api.nvim_create_autocmd('BufWipeout', {
+      buffer = tab_buf,
       once = true,
       callback = function()
         os.remove(png_path)
