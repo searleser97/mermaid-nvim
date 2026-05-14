@@ -232,6 +232,18 @@ local function shorten_sequence(source)
   local next_id_index = 1
   local new_lines = {}
 
+  -- First pass: reserve existing short aliases
+  for _, line in ipairs(lines) do
+    local trimmed = line:match('^%s*(.-)%s*$')
+    local alias = trimmed:match('^participant%s+([%w_%-]+)%s+as%s+')
+    if not alias then
+      alias = trimmed:match('^actor%s+([%w_%-]+)%s+as%s+')
+    end
+    if alias and #alias <= MIN_LABEL_LENGTH then
+      used_shorts[alias] = true
+    end
+  end
+
   for _, line in ipairs(lines) do
     local trimmed = line:match('^%s*(.-)%s*$')
 
@@ -242,17 +254,25 @@ local function shorten_sequence(source)
     end
 
     if keyword and alias and label and #label > MIN_LABEL_LENGTH then
-      -- Generate short ID
-      local short
-      repeat
-        short = generate_id(next_id_index)
-        next_id_index = next_id_index + 1
-      until not used_shorts[short]
-      used_shorts[short] = true
+      -- If alias is already short, keep it as the display name
+      if #alias <= MIN_LABEL_LENGTH then
+        alias_to_short[alias] = alias
+        mappings[#mappings + 1] = { short = alias, label = label }
+        -- Rewrite: participant ALIAS as SHORT
+        new_lines[#new_lines + 1] = line:gsub('as%s+.+$', 'as ' .. alias)
+      else
+        -- Generate a new short ID
+        local short
+        repeat
+          short = generate_id(next_id_index)
+          next_id_index = next_id_index + 1
+        until not used_shorts[short]
+        used_shorts[short] = true
 
-      alias_to_short[alias] = short
-      mappings[#mappings + 1] = { short = short, label = label }
-      new_lines[#new_lines + 1] = line:gsub('as%s+.+$', 'as ' .. short)
+        alias_to_short[alias] = short
+        mappings[#mappings + 1] = { short = short, label = label }
+        new_lines[#new_lines + 1] = line:gsub('as%s+.+$', 'as ' .. short)
+      end
     else
       -- Also match: participant LABEL (no alias) with long label
       local kw, name = trimmed:match('^(participant%s+)([%w_%-]+)%s*$')
@@ -269,6 +289,7 @@ local function shorten_sequence(source)
 
         alias_to_short[name] = short
         mappings[#mappings + 1] = { short = short, label = name }
+        -- Use word boundary to avoid replacing inside other words
         new_lines[#new_lines + 1] = line:gsub(name, short)
       else
         new_lines[#new_lines + 1] = line
@@ -280,10 +301,13 @@ local function shorten_sequence(source)
     return nil
   end
 
-  -- Replace aliases in message lines
+  -- Replace aliases in message lines (only whole-word matches)
   for i, line in ipairs(new_lines) do
     for alias, short in pairs(alias_to_short) do
-      new_lines[i] = new_lines[i]:gsub(alias, short)
+      if alias ~= short then
+        -- Use pattern with word boundaries to avoid replacing inside other words
+        new_lines[i] = new_lines[i]:gsub('(%f[%w_])' .. vim.pesc(alias) .. '(%f[^%w_])', '%1' .. short .. '%2')
+      end
     end
   end
 
