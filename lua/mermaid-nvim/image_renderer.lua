@@ -1,3 +1,5 @@
+local renderer = require('mermaid-nvim.renderer')
+
 local M = {}
 
 --- Check if we can send escape sequences to the terminal
@@ -103,15 +105,6 @@ function M.open_float(source, config)
   vim.bo[float_buf].buftype = 'nofile'
   vim.bo[float_buf].filetype = 'mermaid-image-preview'
 
-  local empty_lines = {}
-  for i = 1, float_height do
-    empty_lines[i] = ''
-  end
-  local msg_line = math.floor(float_height / 2)
-  empty_lines[msg_line] = string.rep(' ', math.floor(float_width / 2) - 10) .. '⏳ Rendering diagram...'
-  vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, empty_lines)
-  vim.bo[float_buf].modifiable = false
-
   local row = math.floor((editor_height - float_height - 2) / 2)
   local col = math.floor((editor_width - float_width - 2) / 2)
 
@@ -126,6 +119,8 @@ function M.open_float(source, config)
     title = ' Mermaid Diagram ',
     title_pos = 'center',
   })
+
+  renderer.replace_content(float_buf, win, '⏳ Rendering diagram...', config)
 
   -- Close keymaps
   local function close()
@@ -148,13 +143,7 @@ function M.open_float(source, config)
   M.render_to_png(source, render_opts, function(png_path, err)
     if err then
       if vim.api.nvim_win_is_valid(win) then
-        vim.bo[float_buf].modifiable = true
-        local err_lines = { '', '  ⚠ Render error:', '' }
-        for line in err:gmatch('[^\n]+') do
-          table.insert(err_lines, '  ' .. line)
-        end
-        vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, err_lines)
-        vim.bo[float_buf].modifiable = false
+        renderer.replace_content(float_buf, win, '⚠ Render error:\n\n' .. err, config)
       end
       vim.notify('[mermaid-nvim] Image render error: ' .. err, vim.log.levels.ERROR)
       return
@@ -166,11 +155,7 @@ function M.open_float(source, config)
     end
 
     -- Clear loading text
-    vim.bo[float_buf].modifiable = true
-    local empty = {}
-    for i = 1, float_height do empty[i] = '' end
-    vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, empty)
-    vim.bo[float_buf].modifiable = false
+    renderer.replace_content(float_buf, win, '', config)
     vim.cmd('redraw')
 
     -- Display image using iTerm2 protocol (OSC 1337)
@@ -205,14 +190,8 @@ function M.open_tab(source, config)
   vim.bo[tab_buf].filetype = 'mermaid-image-preview'
 
   local win_width = vim.api.nvim_win_get_width(tab_win)
-  local win_height = vim.api.nvim_win_get_height(tab_win)
 
-  -- Show loading message
-  local lines = {}
-  for i = 1, win_height do lines[i] = '' end
-  lines[math.floor(win_height / 2)] = string.rep(' ', math.floor(win_width / 2) - 10) .. '⏳ Rendering diagram...'
-  vim.api.nvim_buf_set_lines(tab_buf, 0, -1, false, lines)
-  vim.bo[tab_buf].modifiable = false
+  renderer.replace_content(tab_buf, tab_win, '⏳ Rendering diagram...', config)
 
   -- Close with q or Esc
   local function close()
@@ -235,13 +214,7 @@ function M.open_tab(source, config)
   M.render_to_png(source, render_opts, function(png_path, err)
     if err then
       if vim.api.nvim_buf_is_valid(tab_buf) then
-        vim.bo[tab_buf].modifiable = true
-        local err_lines = { '', '  ⚠ Render error:', '' }
-        for line in err:gmatch('[^\n]+') do
-          table.insert(err_lines, '  ' .. line)
-        end
-        vim.api.nvim_buf_set_lines(tab_buf, 0, -1, false, err_lines)
-        vim.bo[tab_buf].modifiable = false
+        renderer.replace_content(tab_buf, tab_win, '⚠ Render error:\n\n' .. err, config)
       end
       vim.notify('[mermaid-nvim] Image render error: ' .. err, vim.log.levels.ERROR)
       return
@@ -253,11 +226,7 @@ function M.open_tab(source, config)
     end
 
     -- Clear loading text
-    vim.bo[tab_buf].modifiable = true
-    local empty = {}
-    for i = 1, win_height do empty[i] = '' end
-    vim.api.nvim_buf_set_lines(tab_buf, 0, -1, false, empty)
-    vim.bo[tab_buf].modifiable = false
+    renderer.replace_content(tab_buf, tab_win, '', config)
     vim.cmd('redraw')
 
     -- Display image using iTerm2 protocol (OSC 1337)
