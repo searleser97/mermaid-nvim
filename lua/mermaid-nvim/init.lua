@@ -287,25 +287,35 @@ function M.toggle_all()
   end
 end
 
-function M.float_block()
+---@param shorten_override boolean|nil Override shorten_labels for this render (nil = use config)
+function M.float_block(shorten_override)
   local buf = vim.api.nvim_get_current_buf()
   local cursor_row = vim.api.nvim_win_get_cursor(0)[1] - 1
   local blocks = scanner.find_blocks(buf)
   local use_tab = M.config.preview_mode == 'tab'
   local shortener = require('mermaid-nvim.label_shortener')
 
+  local use_shorten = shorten_override
+  if use_shorten == nil then
+    use_shorten = M.config.shorten_labels
+  end
+
   for _, block in ipairs(blocks) do
     if cursor_row >= block.start_row and cursor_row <= block.end_row then
+      -- Build toggle callback that re-renders with opposite shorten mode
+      local function on_toggle_shorten()
+        -- Restore cursor to the block so float_block finds it again
+        vim.api.nvim_win_set_cursor(0, { block.start_row + 1, 0 })
+        M.float_block(not use_shorten)
+      end
+
       -- Apply label shortening if enabled
       local render_source = block.source
       local legend_lines = nil
-      if M.config.shorten_labels then
+      if use_shorten then
         local result, warning = shortener.shorten(block.source)
         if warning then
-          -- Warn via on_error but still render with original source
-          if M.config.on_error == 'notify' then
-            vim.notify('[mermaid-nvim] ' .. warning, vim.log.levels.WARN)
-          elseif M.config.on_error == 'virtual_text' then
+          if M.config.on_error ~= 'silent' then
             vim.notify('[mermaid-nvim] ' .. warning, vim.log.levels.WARN)
           end
         end
@@ -343,9 +353,9 @@ function M.float_block()
           output = table.concat(legend_lines, '\n') .. '\n\n' .. output
         end
         if use_tab then
-          renderer.open_tab(output, M.config)
+          renderer.open_tab(output, M.config, on_toggle_shorten)
         else
-          renderer.open_float(output, M.config)
+          renderer.open_float(output, M.config, on_toggle_shorten)
         end
       else
         renderer.set_button_loading(buf, block)
@@ -365,9 +375,9 @@ function M.float_block()
                 output = table.concat(legend_lines, '\n') .. '\n\n' .. output
               end
               if use_tab then
-                renderer.open_tab(output, M.config)
+                renderer.open_tab(output, M.config, on_toggle_shorten)
               else
-                renderer.open_float(output, M.config)
+                renderer.open_float(output, M.config, on_toggle_shorten)
               end
             else
               vim.notify('[mermaid-nvim] Render error', vim.log.levels.ERROR)

@@ -202,13 +202,21 @@ local function setup_preview_window(buf, win, lines, max_width, opts)
   end, { buffer = buf, nowait = true })
 
   local function center_top()
-    if max_width > win_width then
-      local center_col = math.max(0, math.floor((max_width - win_width) / 2))
+    local cur_win_width = vim.api.nvim_win_get_width(win)
+    local cur_win_height = vim.api.nvim_win_get_height(win)
+    if max_width > cur_win_width then
+      local center_col = math.max(0, math.floor((max_width - cur_win_width) / 2))
       -- Place cursor in the visible center area so Neovim doesn't snap the view
-      local cursor_col = math.min(center_col + math.floor(win_width / 2), max_width - 1)
-      local cursor_row = math.min(math.floor(vim.api.nvim_win_get_height(win) / 2), #lines)
+      local cursor_col = math.min(center_col + math.floor(cur_win_width / 2), max_width - 1)
+      local cursor_row = math.min(math.floor(cur_win_height / 2), #lines)
       vim.fn.winrestview({ leftcol = center_col, topline = 1 })
+      vim.api.nvim_win_set_cursor(win, { math.max(1, cursor_row), cursor_col })
+    else
+      -- Content fits horizontally — just center cursor on content
+      local cursor_col = math.floor(max_width / 2)
+      local cursor_row = math.min(math.max(1, math.floor(#lines / 2)), #lines)
       vim.api.nvim_win_set_cursor(win, { cursor_row, cursor_col })
+      vim.fn.winrestview({ leftcol = 0, topline = 1 })
     end
   end
 
@@ -224,7 +232,8 @@ end
 --- Open a mermaid diagram in a floating window (text/ASCII output)
 ---@param ascii_output string
 ---@param opts mermaid.Config
-function M.open_float(ascii_output, opts)
+---@param on_toggle_shorten function|nil Callback to re-render with toggled shorten_labels
+function M.open_float(ascii_output, opts, on_toggle_shorten)
   local lines = vim.split(ascii_output, '\n')
 
   -- Calculate float dimensions
@@ -284,13 +293,22 @@ function M.open_float(ascii_output, opts)
     callback = close,
   })
 
+  -- Toggle shorten_labels with 's'
+  if on_toggle_shorten then
+    vim.keymap.set('n', 's', function()
+      close()
+      on_toggle_shorten()
+    end, { buffer = float_buf, nowait = true })
+  end
+
   setup_preview_window(float_buf, win, lines, max_width, opts)
 end
 
 --- Open a mermaid diagram in a new tab (text/ASCII output)
 ---@param ascii_output string
 ---@param opts mermaid.Config
-function M.open_tab(ascii_output, opts)
+---@param on_toggle_shorten function|nil Callback to re-render with toggled shorten_labels
+function M.open_tab(ascii_output, opts, on_toggle_shorten)
   local lines = vim.split(ascii_output, '\n')
 
   -- Calculate content dimensions
@@ -329,6 +347,14 @@ function M.open_tab(ascii_output, opts)
   end
   vim.keymap.set('n', 'q', close, { buffer = tab_buf, nowait = true })
   vim.keymap.set('n', '<Esc>', close, { buffer = tab_buf, nowait = true })
+
+  -- Toggle shorten_labels with 's'
+  if on_toggle_shorten then
+    vim.keymap.set('n', 's', function()
+      close()
+      on_toggle_shorten()
+    end, { buffer = tab_buf, nowait = true })
+  end
 
   setup_preview_window(tab_buf, tab_win, lines, max_width, opts)
 end
