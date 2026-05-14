@@ -49,6 +49,9 @@ require('mermaid-nvim').setup({
   -- Buffer names to exclude (plain substring match)
   exclude_bufs = {},
 
+  -- Replace long labels with short IDs and show a legend (reduces diagram width)
+  shorten_labels = false,
+
   -- Debounce time before re-rendering (ms)
   inline_render_delay_ms = 300,
 

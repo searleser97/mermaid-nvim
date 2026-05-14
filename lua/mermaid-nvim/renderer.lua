@@ -23,33 +23,47 @@ function M.render_block(buf, block, config)
     return
   end
 
-  local content_hash = cache.hash(block.source, config.cmd)
+  -- Apply label shortening if enabled
+  local render_source = block.source
+  local legend_lines = nil
+  if config.shorten_labels then
+    local shortener = require('mermaid-nvim.label_shortener')
+    local result, warning = shortener.shorten(block.source)
+    if warning and config.on_error == 'notify' then
+      vim.notify('[mermaid-nvim] ' .. warning, vim.log.levels.WARN)
+    end
+    if result then
+      render_source = result.source
+      legend_lines = shortener.format_legend(result.mappings)
+    end
+  end
+
+  local content_hash = cache.hash(render_source, config.cmd)
   local cached = cache.get(content_hash)
 
   if cached then
-    M.apply_extmarks(buf, block, cached)
+    M.apply_extmarks(buf, block, cached, legend_lines)
     return
   end
 
-  M.render_async(buf, block, config, content_hash)
+  M.render_async(buf, block, config, content_hash, render_source, legend_lines)
 end
 
 ---@param buf integer
 ---@param block mermaid.Block
 ---@param config mermaid.Config
 ---@param content_hash string
-function M.render_async(buf, block, config, content_hash)
+---@param render_source string
+---@param legend_lines string[]|nil
+function M.render_async(buf, block, config, content_hash, render_source, legend_lines)
   -- Set PYTHONIOENCODING for tools like termaid that output Unicode
   local env = vim.fn.environ()
   env.PYTHONIOENCODING = 'utf-8'
 
   local cmd = vim.deepcopy(config.cmd)
 
-  -- Remember the source we're rendering to verify on completion
-  local expected_source = block.source
-
   vim.system(cmd, {
-    stdin = block.source,
+    stdin = render_source,
     text = true,
     env = env,
   }, function(result)
@@ -72,7 +86,7 @@ function M.render_async(buf, block, config, content_hash)
       -- Remove trailing newline
       output = output:gsub('\n$', '')
       cache.set(content_hash, output)
-      M.apply_extmarks(buf, block, output)
+      M.apply_extmarks(buf, block, output, legend_lines)
     end)
   end)
 end
@@ -81,7 +95,8 @@ end
 ---@param buf integer
 ---@param block mermaid.Block
 ---@param ascii_output string
-function M.apply_extmarks(buf, block, ascii_output)
+---@param legend_lines string[]|nil
+function M.apply_extmarks(buf, block, ascii_output, legend_lines)
   -- Clear existing marks for this block
   M.clear_block(buf, block)
 
@@ -90,6 +105,15 @@ function M.apply_extmarks(buf, block, ascii_output)
   -- Build virtual lines for the ASCII diagram (with right padding)
   local padding = string.rep(' ', 4)
   local virt_lines = {}
+
+  -- Prepend legend if available
+  if legend_lines and #legend_lines > 0 then
+    for _, lline in ipairs(legend_lines) do
+      virt_lines[#virt_lines + 1] = { { lline .. padding, 'DiagnosticInfo' } }
+    end
+    virt_lines[#virt_lines + 1] = { { '', 'Normal' } } -- blank separator
+  end
+
   for _, line in ipairs(ascii_lines) do
     virt_lines[#virt_lines + 1] = { { line .. padding, 'Comment' } }
   end

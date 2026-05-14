@@ -9,6 +9,7 @@ local M = {}
 ---@field enabled boolean Whether to attach to markdown buffers (buttons, keymaps, auto-render)
 ---@field preview_mode 'tab'|'float' Whether to open diagrams in a new tab or a floating window
 ---@field exclude_bufs string[] Buffer names to exclude from mermaid-nvim (no window settings or rendering)
+---@field shorten_labels boolean Replace long node labels with short IDs and show a legend above the diagram
 ---@field render_inline_on_open boolean Whether to render diagrams inline when the buffer is opened
 ---@field float_initial_view_centered boolean Whether to center the viewport in the float window on open
 ---@field float_scroll_step_horizontal integer Number of columns to scroll per arrow key press in float
@@ -20,6 +21,7 @@ local default_config = {
   enabled = true,
   preview_mode = 'tab',
   exclude_bufs = {},
+  shorten_labels = false,
   render_inline_on_open = true,
   float_initial_view_centered = true,
   float_scroll_step_horizontal = 6,
@@ -290,9 +292,29 @@ function M.float_block()
   local cursor_row = vim.api.nvim_win_get_cursor(0)[1] - 1
   local blocks = scanner.find_blocks(buf)
   local use_tab = M.config.preview_mode == 'tab'
+  local shortener = require('mermaid-nvim.label_shortener')
 
   for _, block in ipairs(blocks) do
     if cursor_row >= block.start_row and cursor_row <= block.end_row then
+      -- Apply label shortening if enabled
+      local render_source = block.source
+      local legend_lines = nil
+      if M.config.shorten_labels then
+        local result, warning = shortener.shorten(block.source)
+        if warning then
+          -- Warn via on_error but still render with original source
+          if M.config.on_error == 'notify' then
+            vim.notify('[mermaid-nvim] ' .. warning, vim.log.levels.WARN)
+          elseif M.config.on_error == 'virtual_text' then
+            vim.notify('[mermaid-nvim] ' .. warning, vim.log.levels.WARN)
+          end
+        end
+        if result then
+          render_source = result.source
+          legend_lines = shortener.format_legend(result.mappings)
+        end
+      end
+
       -- Image renderer path
       if M.is_image_mode() then
         local image_renderer = require('mermaid-nvim.image_renderer')
@@ -302,9 +324,9 @@ function M.float_block()
         end
         renderer.set_button_loading(buf, block)
         if use_tab then
-          image_renderer.open_tab(block.source, M.config)
+          image_renderer.open_tab(render_source, M.config)
         else
-          image_renderer.open_float(block.source, M.config)
+          image_renderer.open_float(render_source, M.config)
         end
         vim.defer_fn(function()
           renderer.set_button(buf, block)
@@ -313,20 +335,24 @@ function M.float_block()
       end
 
       -- Text renderer path
-      local content_hash = cache.hash(block.source, M.config.cmd)
+      local content_hash = cache.hash(render_source, M.config.cmd)
       local cached = cache.get(content_hash)
       if cached then
+        local output = cached
+        if legend_lines then
+          output = table.concat(legend_lines, '\n') .. '\n\n' .. output
+        end
         if use_tab then
-          renderer.open_tab(cached, M.config)
+          renderer.open_tab(output, M.config)
         else
-          renderer.open_float(cached, M.config)
+          renderer.open_float(output, M.config)
         end
       else
         renderer.set_button_loading(buf, block)
         local env = vim.fn.environ()
         env.PYTHONIOENCODING = 'utf-8'
         vim.system(vim.deepcopy(M.config.cmd), {
-          stdin = block.source,
+          stdin = render_source,
           text = true,
           env = env,
         }, function(result)
@@ -335,6 +361,9 @@ function M.float_block()
             if result.code == 0 and result.stdout and result.stdout ~= '' then
               local output = result.stdout:gsub('\n$', '')
               cache.set(content_hash, output)
+              if legend_lines then
+                output = table.concat(legend_lines, '\n') .. '\n\n' .. output
+              end
               if use_tab then
                 renderer.open_tab(output, M.config)
               else
