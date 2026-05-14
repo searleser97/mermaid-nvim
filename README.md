@@ -67,9 +67,9 @@ your Neovim config:
 vim.api.nvim_create_autocmd('FileType', {
   pattern = 'markdown',
   callback = function()
-    vim.opt_local.wrap = false
-    vim.opt_local.virtualedit = 'all'
-    vim.opt_local.smoothscroll = true
+    vim.opt_local.wrap = false          -- allow horizontal scrolling for wide diagrams
+    vim.opt_local.virtualedit = 'all'   -- move cursor freely past end of line
+    vim.opt_local.smoothscroll = true   -- pixel-level vertical scrolling
   end,
 })
 ```
