@@ -3,12 +3,26 @@ local cache = require('mermaid-nvim.cache')
 local M = {}
 
 local ns = vim.api.nvim_create_namespace('mermaid_nvim')
+local ns_button = vim.api.nvim_create_namespace('mermaid_nvim_buttons')
+
+-- Button highlight: use reverse of a theme color for visibility
+vim.api.nvim_set_hl(0, 'MermaidButton', { link = 'Search' })
 
 ---Render a single mermaid block
 ---@param buf integer
 ---@param block mermaid.Block
 ---@param config mermaid.Config
 function M.render_block(buf, block, config)
+  -- Detect image mode from command name
+  local cmd_name = vim.fn.fnamemodify(config.cmd[1], ':t'):gsub('%.exe$', '')
+  local is_image = ({ mmdc = true })[cmd_name]
+
+  if is_image then
+    local image_renderer = require('mermaid-nvim.image_renderer')
+    image_renderer.render_inline(buf, block, config)
+    return
+  end
+
   local content_hash = cache.hash(block.source, config.cmd)
   local cached = cache.get(content_hash)
 
@@ -63,7 +77,7 @@ function M.render_async(buf, block, config, content_hash)
   end)
 end
 
----Apply extmarks to conceal the block and show ASCII art
+---Apply extmarks to show ASCII art below the block
 ---@param buf integer
 ---@param block mermaid.Block
 ---@param ascii_output string
@@ -80,28 +94,51 @@ function M.apply_extmarks(buf, block, ascii_output)
     virt_lines[#virt_lines + 1] = { { line .. padding, 'Comment' } }
   end
 
-  -- Hide each source line and show ASCII art via virt_lines on the first line
-  for row = block.start_row, block.end_row do
-    local opts = {
-      end_row = row,
-      end_col = #(vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ''),
-      conceal = '',
-    }
-    -- Attach virtual lines and a clickable "Open" button to the first concealed line
-    if row == block.start_row then
-      opts.virt_lines = virt_lines
-      opts.virt_lines_above = false
-      opts.virt_lines_overflow = 'scroll'
-      opts.virt_text = { { ' 🔍 Open in float ', 'DiagnosticInfo' } }
-      opts.virt_text_pos = 'eol'
-    end
-    vim.api.nvim_buf_set_extmark(buf, ns, row, 0, opts)
+  -- Show ASCII art above the block
+  vim.api.nvim_buf_set_extmark(buf, ns, block.start_row, 0, {
+    virt_lines = virt_lines,
+    virt_lines_above = true,
+    virt_lines_overflow = 'scroll',
+  })
+
+  -- Show button (separate namespace, survives toggle)
+  M.set_button(buf, block)
+end
+
+---Place the expand button on a block's opening fence line
+---@param buf integer
+---@param block mermaid.Block
+function M.set_button(buf, block)
+  M._set_button_text(buf, block.start_row, ' ⛶ Expand Diagram ')
+end
+
+---Show loading state on a block's button
+---@param buf integer
+---@param block mermaid.Block
+function M.set_button_loading(buf, block)
+  M._set_button_text(buf, block.start_row, ' ⏳ Loading... ')
+end
+
+---@param buf integer
+---@param row integer
+---@param text string
+function M._set_button_text(buf, row, text)
+  local marks = vim.api.nvim_buf_get_extmarks(buf, ns_button, { row, 0 }, { row, -1 }, {})
+  for _, mark in ipairs(marks) do
+    vim.api.nvim_buf_del_extmark(buf, ns_button, mark[1])
   end
+  vim.api.nvim_buf_set_extmark(buf, ns_button, row, 0, {
+    virt_text = {
+      { '  ', 'Normal' },
+      { text, 'MermaidButton' },
+    },
+    virt_text_pos = 'eol',
+  })
 end
 
 ---Open a mermaid diagram in a scrollable floating window
 ---@param ascii_output string
-function M.open_float(ascii_output)
+function M.open_float(ascii_output, opts)
   local lines = vim.split(ascii_output, '\n')
 
   -- Calculate float dimensions
@@ -115,6 +152,15 @@ function M.open_float(ascii_output)
   local editor_height = vim.o.lines - vim.o.cmdheight - 1 -- subtract cmdline + statusline
   local float_width = math.min(max_width + 2, editor_width - 4)
   local float_height = math.min(#lines, editor_height - 4)
+
+  -- Center content horizontally by padding lines if diagram is wider than window
+  local float_center = opts and opts.float_initial_view_centered ~= nil and opts.float_initial_view_centered or true
+  if float_center and max_width < float_width then
+    local pad = string.rep(' ', math.floor((float_width - max_width) / 2))
+    for i, line in ipairs(lines) do
+      lines[i] = pad .. line
+    end
+  end
 
   -- Create scratch buffer with diagram content
   local float_buf = vim.api.nvim_create_buf(false, true)
@@ -151,6 +197,56 @@ function M.open_float(ascii_output)
     once = true,
     callback = close,
   })
+
+  -- Float window settings
+  vim.wo[win].wrap = false
+  vim.wo[win].virtualedit = 'all'
+  vim.wo[win].smoothscroll = opts and opts.smoothscroll or false
+
+  -- Navigation keymaps: arrows pan the viewport
+  local h_step = (opts and opts.float_scroll_step_horizontal) or 6
+  local v_step = (opts and opts.float_scroll_step_vertical) or 6
+  vim.keymap.set('n', '<Left>', function() vim.cmd('normal! ' .. h_step .. 'zh') end, { buffer = float_buf, nowait = true })
+  vim.keymap.set('n', '<Right>', function() vim.cmd('normal! ' .. h_step .. 'zl') end, { buffer = float_buf, nowait = true })
+  vim.keymap.set('n', '<Up>', function()
+    local keys = vim.api.nvim_replace_termcodes(v_step .. '<C-y>', true, false, true)
+    vim.api.nvim_feedkeys(keys, 'nx', false)
+  end, { buffer = float_buf, nowait = true })
+  vim.keymap.set('n', '<Down>', function()
+    local keys = vim.api.nvim_replace_termcodes(v_step .. '<C-e>', true, false, true)
+    vim.api.nvim_feedkeys(keys, 'nx', false)
+  end, { buffer = float_buf, nowait = true })
+  vim.keymap.set('n', 'H', function() vim.fn.winrestview({ leftcol = 0 }) end, { buffer = float_buf, nowait = true })
+  vim.keymap.set('n', 'L', function() vim.fn.winrestview({ leftcol = math.max(0, max_width - float_width) }) end, { buffer = float_buf, nowait = true })
+  vim.keymap.set('n', '0', function() vim.fn.winrestview({ leftcol = 0 }) end, { buffer = float_buf, nowait = true })
+  vim.keymap.set('n', 'c', function()
+    local center_col = math.max(0, math.floor((max_width - float_width) / 2))
+    local center_line = math.max(1, math.floor((#lines - float_height) / 2) + 1)
+    local mid_line = math.max(1, math.floor(#lines / 2))
+    local mid_col = math.max(0, math.floor(max_width / 2))
+    vim.api.nvim_win_set_cursor(win, { mid_line, mid_col })
+    vim.fn.winrestview({ leftcol = center_col, topline = center_line })
+  end, { buffer = float_buf, nowait = true })
+
+  -- Center top: horizontally centered, top of diagram
+  local function center_top()
+    if max_width > float_width then
+      local center_col = math.max(0, math.floor((max_width - float_width) / 2))
+      local mid_line = math.max(1, math.floor(#lines / 2))
+      local mid_col = math.max(0, math.floor(max_width / 2))
+      -- Center horizontally like 'c', then go to top, cursor at middle of screen
+      vim.api.nvim_win_set_cursor(win, { mid_line, mid_col })
+      vim.fn.winrestview({ leftcol = center_col, topline = 1 })
+      vim.cmd('normal! ggM')
+    end
+  end
+
+  vim.keymap.set('n', 't', center_top, { buffer = float_buf, nowait = true })
+
+  -- Apply initial centering
+  if float_center then
+    center_top()
+  end
 end
 
 ---Handle render errors
@@ -187,6 +283,11 @@ end
 ---@param buf integer
 function M.clear_all(buf)
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+  -- Also clear inline images if image renderer was used
+  local ok, image_renderer = pcall(require, 'mermaid-nvim.image_renderer')
+  if ok then
+    image_renderer.clear_inline(buf)
+  end
 end
 
 return M
