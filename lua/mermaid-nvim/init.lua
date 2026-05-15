@@ -66,6 +66,11 @@ function M.setup(opts)
     M.clear_buf(0)
   end, { desc = 'Clear all mermaid previews in the current buffer' })
 
+  vim.api.nvim_create_user_command('MermaidClearCache', function()
+    cache.clear()
+    vim.notify('[mermaid-nvim] Cache cleared', vim.log.levels.INFO)
+  end, { desc = 'Clear the mermaid render cache' })
+
   vim.api.nvim_create_user_command('MermaidToggleAll', function()
     M.toggle_all()
   end, { desc = 'Toggle all mermaid blocks between preview and source' })
