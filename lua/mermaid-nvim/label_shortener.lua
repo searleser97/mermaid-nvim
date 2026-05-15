@@ -366,11 +366,11 @@ end
 local function apply_hints_flowchart(source, mappings)
   local result = source
   for _, m in ipairs(mappings) do
-    -- In shortened source, labels are replaced inside shape brackets e.g. [A] → [A:SkAg]
-    -- Use shape-aware replacement to avoid modifying node IDs
+    -- In shortened source, labels are replaced inside shape brackets e.g. [A] → ["A:CHAMJ"]
+    -- Use quotes to prevent mermaid from interpreting ':' as a style separator
     for _, shape in ipairs(flowchart_shapes) do
       local pattern = '(' .. shape.open .. ')' .. vim.pesc(m.short) .. '(' .. shape.close .. ')'
-      local replacement = '%1' .. m.short .. ':' .. m.hint .. '%2'
+      local replacement = '%1"' .. m.short .. ':' .. m.hint .. '"%2'
       local new_result = result:gsub(pattern, replacement)
       if new_result ~= result then
         result = new_result
@@ -426,14 +426,36 @@ function M.shorten(source, show_hints)
   end
 end
 
---- Format mappings as legend lines
+--- Format mappings as legend lines, fitting multiple entries per line
 ---@param mappings { short: string, label: string }[]
+---@param max_width integer|nil Maximum line width (defaults to vim.o.columns)
 ---@return string[]
-function M.format_legend(mappings)
+function M.format_legend(mappings, max_width)
+  max_width = max_width or vim.o.columns
+  local sep = ' | '
+  local indent = '  '
   local lines = {}
-  for _, m in ipairs(mappings) do
-    lines[#lines + 1] = '  ' .. m.short .. ': ' .. m.label
+  local current_line = indent
+
+  for i, m in ipairs(mappings) do
+    local entry = m.short .. ': ' .. m.label
+    if #current_line == #indent then
+      -- First entry on this line
+      current_line = current_line .. entry
+    elseif #current_line + #sep + #entry <= max_width then
+      -- Fits on current line
+      current_line = current_line .. sep .. entry
+    else
+      -- Wrap to next line
+      lines[#lines + 1] = current_line
+      current_line = indent .. entry
+    end
   end
+
+  if #current_line > #indent then
+    lines[#lines + 1] = current_line
+  end
+
   return lines
 end
 
