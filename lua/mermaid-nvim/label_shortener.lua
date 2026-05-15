@@ -16,31 +16,39 @@ local function generate_id(index)
 end
 
 --- Generate an abbreviation hint from a label
---- CamelCase: first 2 chars per word (SkillsAggregator → SkAg)
---- Space/underscore separated: first 2 chars per word, preserving case (api_tool_skills → ApTo)
+--- CamelCase: first char per word uppercased (codeHarnessAgent.module.json → CHAMJ)
+--- Space/underscore/dot/hyphen separated: first char per word uppercased (api_tool_skills → ATS)
 ---@param label string
 ---@return string
 local function generate_hint(label)
   local parts = {}
 
-  -- Split on camelCase boundaries, spaces, underscores, and hyphens
-  -- First try camelCase split
-  local camel_parts = {}
-  for word in label:gmatch('[A-Z][a-z]*') do
-    camel_parts[#camel_parts + 1] = word
+  -- First split on dots, spaces, underscores, and hyphens into segments
+  local segments = {}
+  for seg in label:gmatch('[^%s_%.%-]+') do
+    segments[#segments + 1] = seg
   end
 
-  if #camel_parts >= 2 then
-    -- CamelCase: take first 2 chars of each word
-    for _, word in ipairs(camel_parts) do
-      parts[#parts + 1] = word:sub(1, 2)
+  -- For each segment, split on camelCase boundaries
+  for _, seg in ipairs(segments) do
+    -- Match: optional leading lowercase + subsequent Uppercase words
+    local camel_words = {}
+    local leading = seg:match('^([a-z]+)')
+    if leading then
+      camel_words[#camel_words + 1] = leading
     end
-  else
-    -- Split on spaces, underscores, hyphens
-    for word in label:gmatch('[^%s_%-]+') do
-      if #word > 0 then
-        -- Take first 2 chars, preserving original case
-        parts[#parts + 1] = word:sub(1, 2)
+    for word in seg:gmatch('[A-Z][a-z]*') do
+      camel_words[#camel_words + 1] = word
+    end
+
+    if #camel_words > 0 then
+      for _, word in ipairs(camel_words) do
+        parts[#parts + 1] = word:sub(1, 1):upper()
+      end
+    else
+      -- Segment has no camelCase structure, take first char
+      if #seg > 0 then
+        parts[#parts + 1] = seg:sub(1, 1):upper()
       end
     end
   end

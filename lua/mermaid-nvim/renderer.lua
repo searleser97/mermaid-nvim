@@ -28,7 +28,7 @@ function M.render_block(buf, block, config)
   local legend_lines = nil
   if config.shorten_labels then
     local shortener = require('mermaid-nvim.label_shortener')
-    local result, warning = shortener.shorten(block.source)
+    local result, warning = shortener.shorten(block.source, config.shorten_labels_hints)
     if warning and config.on_error == 'notify' then
       vim.notify('[mermaid-nvim] ' .. warning, vim.log.levels.WARN)
     end
