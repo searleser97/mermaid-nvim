@@ -177,11 +177,42 @@ function M.replace_content(buf, win, new_output, opts)
   local win_height = vim.api.nvim_win_get_height(win)
 
   -- Center content horizontally by padding
+  -- Find the diagram block (after the legend separator) and center it uniformly,
+  -- then center legend lines individually so both appear centered
   local should_center = opts and opts.float_initial_view_centered ~= nil and opts.float_initial_view_centered or true
   if should_center and max_width < win_width then
-    local pad = string.rep(' ', math.floor((win_width - max_width) / 2))
+    -- Find where diagram starts (after empty line separator from legend)
+    local diagram_start = 1
     for i, line in ipairs(lines) do
-      lines[i] = pad .. line
+      -- First non-empty line after an empty line that follows legend content
+      if i > 1 and lines[i - 1] == '' and line ~= '' and line:match('[┌╭╔│║┃━─═▶▼]') then
+        diagram_start = i
+        break
+      end
+    end
+
+    -- Calculate diagram width for uniform centering
+    local diagram_width = 0
+    for i = diagram_start, #lines do
+      local w = vim.fn.strdisplaywidth(lines[i])
+      if w > diagram_width then diagram_width = w end
+    end
+
+    -- Center diagram block uniformly
+    local diagram_pad = string.rep(' ', math.floor((win_width - diagram_width) / 2))
+    for i = diagram_start, #lines do
+      if lines[i] ~= '' then
+        lines[i] = diagram_pad .. lines[i]
+      end
+    end
+
+    -- Center legend lines individually
+    for i = 1, diagram_start - 1 do
+      if lines[i] ~= '' then
+        local line_width = vim.fn.strdisplaywidth(lines[i])
+        local pad = string.rep(' ', math.floor((win_width - line_width) / 2))
+        lines[i] = pad .. lines[i]
+      end
     end
   end
 
