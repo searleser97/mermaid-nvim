@@ -23,9 +23,12 @@ end
 local function generate_hint(label)
   local parts = {}
 
+  -- Strip non-ASCII characters and quotes before processing
+  local clean = label:gsub('[^%w%s_%.%-]', '')
+
   -- First split on dots, spaces, underscores, and hyphens into segments
   local segments = {}
-  for seg in label:gmatch('[^%s_%.%-]+') do
+  for seg in clean:gmatch('[^%s_%.%-]+') do
     segments[#segments + 1] = seg
   end
 
