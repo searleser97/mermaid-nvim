@@ -74,6 +74,11 @@ function M.setup(opts)
     M.float_block()
   end, { desc = 'Open mermaid block under cursor in a floating window' })
 
+  vim.api.nvim_create_user_command('MermaidToggleShorten', function()
+    M.config.shorten_labels = not M.config.shorten_labels
+    M.render_buf(0)
+  end, { desc = 'Toggle shorten_labels and re-render inline diagrams' })
+
   if M.config.enabled then
     local group = vim.api.nvim_create_augroup('MermaidNvim', { clear = true })
 
