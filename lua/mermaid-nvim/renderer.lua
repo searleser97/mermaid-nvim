@@ -435,6 +435,7 @@ end
 ---@param buf integer
 function M.clear_all(buf)
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+  vim.api.nvim_buf_clear_namespace(buf, ns_button, 0, -1)
   -- Also clear inline images if image renderer was used
   local ok, image_renderer = pcall(require, 'mermaid-nvim.image_renderer')
   if ok then
