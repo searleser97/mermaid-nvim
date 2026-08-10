@@ -8,6 +8,90 @@ local ns_button = vim.api.nvim_create_namespace('mermaid_nvim_buttons')
 -- Button highlight: use reverse of a theme color for visibility
 vim.api.nvim_set_hl(0, 'MermaidButton', { link = 'Search' })
 
+local function text_result(output, legend_lines, config)
+  local lines = {}
+  local chunks = {}
+  local highlights = config.highlights or {}
+
+  for _, line in ipairs(legend_lines or {}) do
+    lines[#lines + 1] = line
+    chunks[#chunks + 1] = { { line, highlights.legend or 'DiagnosticInfo' } }
+  end
+  if legend_lines and #legend_lines > 0 then
+    lines[#lines + 1] = ''
+    chunks[#chunks + 1] = { { '', 'Normal' } }
+  end
+  for _, line in ipairs(vim.split(output, '\n', { plain = true })) do
+    lines[#lines + 1] = line
+    chunks[#chunks + 1] = { { line, highlights.diagram or 'Comment' } }
+  end
+
+  return {
+    output = output,
+    legend = legend_lines or {},
+    lines = lines,
+    chunks = chunks,
+  }
+end
+
+---Render Mermaid source into highlighted text lines without mutating global configuration.
+---@param source string
+---@param config mermaid.Config
+---@param callback fun(result: table)
+function M.render_text(source, config, callback)
+  local cmd_name = vim.fn.fnamemodify(config.cmd[1], ':t'):gsub('%.exe$', '')
+  if ({ mmdc = true })[cmd_name] then
+    callback({ error = 'text rendering is unavailable for image commands' })
+    return
+  end
+
+  local render_source = source
+  local legend_lines
+  if config.shorten_labels then
+    local shortener = require('mermaid-nvim.label_shortener')
+    local result, warning = shortener.shorten(source, config.shorten_labels_hints)
+    if warning and config.on_error == 'notify' then
+      vim.notify('[mermaid-nvim] ' .. warning, vim.log.levels.WARN)
+    end
+    if result then
+      render_source = result.source
+      legend_lines = shortener.format_legend(result.mappings)
+    end
+  end
+
+  local content_hash = cache.hash(render_source, config.cmd)
+  local cached = cache.get(content_hash)
+  if cached then
+    callback(text_result(cached, legend_lines, config))
+    return
+  end
+
+  local env = vim.fn.environ()
+  env.PYTHONIOENCODING = 'utf-8'
+  local ok, error_message = pcall(vim.system, vim.deepcopy(config.cmd), {
+    stdin = render_source,
+    text = true,
+    env = env,
+  }, function(result)
+    vim.schedule(function()
+      if result.code ~= 0 then
+        callback({ error = result.stderr or 'unknown render error' })
+        return
+      end
+      local output = (result.stdout or ''):gsub('\n$', '')
+      if output == '' then
+        callback({ error = 'renderer produced no output' })
+        return
+      end
+      cache.set(content_hash, output)
+      callback(text_result(output, legend_lines, config))
+    end)
+  end)
+  if not ok then
+    callback({ error = tostring(error_message) })
+  end
+end
+
 ---Render a single mermaid block
 ---@param buf integer
 ---@param block mermaid.Block
@@ -23,99 +107,35 @@ function M.render_block(buf, block, config)
     return
   end
 
-  -- Apply label shortening if enabled
-  local render_source = block.source
-  local legend_lines = nil
-  if config.shorten_labels then
-    local shortener = require('mermaid-nvim.label_shortener')
-    local result, warning = shortener.shorten(block.source, config.shorten_labels_hints)
-    if warning and config.on_error == 'notify' then
-      vim.notify('[mermaid-nvim] ' .. warning, vim.log.levels.WARN)
+  M.render_text(block.source, config, function(result)
+    if not vim.api.nvim_buf_is_valid(buf) then
+      return
     end
-    if result then
-      render_source = result.source
-      legend_lines = shortener.format_legend(result.mappings)
+    if result.error then
+      M.handle_error(buf, block, result.error, config)
+      return
     end
-  end
-
-  local content_hash = cache.hash(render_source, config.cmd)
-  local cached = cache.get(content_hash)
-
-  if cached then
-    M.apply_extmarks(buf, block, cached, legend_lines)
-    return
-  end
-
-  M.render_async(buf, block, config, content_hash, render_source, legend_lines)
-end
-
----@param buf integer
----@param block mermaid.Block
----@param config mermaid.Config
----@param content_hash string
----@param render_source string
----@param legend_lines string[]|nil
-function M.render_async(buf, block, config, content_hash, render_source, legend_lines)
-  -- Set PYTHONIOENCODING for tools like termaid that output Unicode
-  local env = vim.fn.environ()
-  env.PYTHONIOENCODING = 'utf-8'
-
-  local cmd = vim.deepcopy(config.cmd)
-
-  vim.system(cmd, {
-    stdin = render_source,
-    text = true,
-    env = env,
-  }, function(result)
-    vim.schedule(function()
-      if not vim.api.nvim_buf_is_valid(buf) then
-        return
-      end
-
-      if result.code ~= 0 then
-        local err = result.stderr or 'unknown error'
-        M.handle_error(buf, block, err, config)
-        return
-      end
-
-      local output = result.stdout or ''
-      if output == '' then
-        return
-      end
-
-      -- Remove trailing newline
-      output = output:gsub('\n$', '')
-      cache.set(content_hash, output)
-      M.apply_extmarks(buf, block, output, legend_lines)
-    end)
+    M.apply_extmarks(buf, block, result)
   end)
 end
 
 ---Apply extmarks to show ASCII art below the block
 ---@param buf integer
 ---@param block mermaid.Block
----@param ascii_output string
----@param legend_lines string[]|nil
-function M.apply_extmarks(buf, block, ascii_output, legend_lines)
+---@param result table
+function M.apply_extmarks(buf, block, result)
   -- Clear existing marks for this block
   M.clear_block(buf, block)
-
-  local ascii_lines = vim.split(ascii_output, '\n')
 
   -- Build virtual lines for the ASCII diagram (with right padding)
   local padding = string.rep(' ', 4)
   local virt_lines = {}
-
-  -- Prepend legend if available
-  if legend_lines and #legend_lines > 0 then
-    for _, lline in ipairs(legend_lines) do
-      virt_lines[#virt_lines + 1] = { { lline .. padding, 'DiagnosticInfo' } }
+  for _, line_chunks in ipairs(result.chunks) do
+    local chunks = vim.deepcopy(line_chunks)
+    if #chunks > 0 and chunks[#chunks][1] ~= '' then
+      chunks[#chunks][1] = chunks[#chunks][1] .. padding
     end
-    virt_lines[#virt_lines + 1] = { { '', 'Normal' } } -- blank separator
-  end
-
-  for _, line in ipairs(ascii_lines) do
-    virt_lines[#virt_lines + 1] = { { line .. padding, 'Comment' } }
+    virt_lines[#virt_lines + 1] = chunks
   end
 
   -- Show ASCII art above the block

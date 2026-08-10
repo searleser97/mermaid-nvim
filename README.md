@@ -57,6 +57,12 @@ require('mermaid-nvim').setup({
 
   -- How to display render errors: 'virtual_text', 'notify', or 'silent'
   on_error = 'virtual_text',
+
+  -- Highlight groups for inline ASCII output
+  highlights = {
+    diagram = 'Comment',
+    legend = 'DiagnosticInfo',
+  },
 })
 ```
 
@@ -152,6 +158,28 @@ require('render-markdown').setup({
     disable = { 'mermaid' },
   },
 })
+```
+
+## Lua text-rendering API
+
+Integrations can render highlighted ASCII lines with per-call options without
+changing the plugin's global configuration:
+
+```lua
+require('mermaid-nvim.renderer').render_text(source, {
+  cmd = { 'termaid' },
+  shorten_labels = false,
+  highlights = {
+    diagram = 'DiagnosticInfo',
+    legend = 'DiagnosticInfo',
+  },
+}, function(result)
+  if result.error then
+    return
+  end
+  -- result.lines contains plain text.
+  -- result.chunks contains { text, highlight } chunks for each line.
+end)
 ```
 
 ## Alternative renderers

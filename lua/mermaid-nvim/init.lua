@@ -17,6 +17,7 @@ local M = {}
 ---@field float_scroll_step_vertical integer Number of lines to scroll per arrow key press in float
 ---@field inline_render_delay_ms integer Delay in ms after typing stops before re-rendering inline diagrams
 ---@field on_error 'virtual_text'|'notify'|'silent' How to display render errors
+---@field highlights { diagram: string, legend: string } Highlight groups for rendered text
 local default_config = {
   cmd = { 'termaid' },
   enabled = true,
@@ -30,6 +31,10 @@ local default_config = {
   float_scroll_step_vertical = 6,
   inline_render_delay_ms = 300,
   on_error = 'virtual_text',
+  highlights = {
+    diagram = 'Comment',
+    legend = 'DiagnosticInfo',
+  },
 }
 
 -- Commands that produce image output (PNG) instead of text
@@ -52,7 +57,7 @@ function M.is_image_mode()
 end
 
 function M.setup(opts)
-  M.config = vim.tbl_deep_extend('force', default_config, opts or {})
+  M.config = vim.tbl_deep_extend('force', vim.deepcopy(default_config), opts or {})
 
   vim.api.nvim_create_user_command('MermaidToggle', function()
     M.toggle_block()
